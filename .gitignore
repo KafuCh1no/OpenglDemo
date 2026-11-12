@@ -1,0 +1,10 @@
+# 构建输出（换机器会自动重新生成，不要入库）
+out/
+build/
+
+# Visual Studio 本地缓存
+.vs/
+
+# 用户本地配置
+*.user
+CMakeUserPresets.json
