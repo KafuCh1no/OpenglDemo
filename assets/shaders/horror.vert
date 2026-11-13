@@ -8,9 +8,11 @@ out vec3 WorldPos;
 out vec3 Normal;
 out vec3 ObjectColor;
 out vec2 TexCoords;
+out vec4 vLightSpacePos;
 
 uniform mat4 projection;
 uniform mat4 view;
+uniform mat4 lightSpaceMatrix;
 
 void main()
 {
@@ -19,5 +21,6 @@ void main()
     Normal       = aNormal;
     ObjectColor  = aColor;
     TexCoords    = aUV;
-    gl_Position  = projection * view * vec4(aPos, 1.0);
+    vLightSpacePos = lightSpaceMatrix * vec4(aPos, 1.0);  // 世界坐标 → 灯裁剪空间
+    gl_Position = projection * view * vec4(aPos, 1.0);
 }

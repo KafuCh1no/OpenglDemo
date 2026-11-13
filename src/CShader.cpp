@@ -76,6 +76,24 @@ void CShader::setMat4(const std::string& name, const glm::mat4& mat) const
     glUniformMatrix4fv(glGetUniformLocation(ID, name.c_str()), 1, GL_FALSE, glm::value_ptr(mat));
 }
 
+void CShader::setVec3Array(const std::string& name, const glm::vec3* data, int count) const
+{
+    if (count <= 0) return;
+    glUniform3fv(glGetUniformLocation(ID, name.c_str()), count, glm::value_ptr(*data));
+}
+
+void CShader::setFloatArray(const std::string& name, const float* data, int count) const
+{
+    if (count <= 0) return;
+    glUniform1fv(glGetUniformLocation(ID, name.c_str()), count, data);
+}
+
+void CShader::setIntArray(const std::string& name, const int* data, int count) const
+{
+    if (count <= 0) return;
+    glUniform1iv(glGetUniformLocation(ID, name.c_str()), count, data);
+}
+
 void CShader::checkCompileErrors(unsigned int shader, const std::string& type)
 {
     int success;

@@ -37,13 +37,19 @@ if (MSVC)
     target_compile_options(Demo PRIVATE /utf-8)
 endif()
 
-# 每次编译后把 assets 同步到 exe 旁边：
-# VS 的 CMake 模式默认以 exe 目录为工作目录，这样 "assets/xxx" 才能读到
-add_custom_command(TARGET Demo POST_BUILD
+# 每次构建都把 assets 同步到 exe 旁边：
+# VS 的 CMake 模式默认以 exe 目录为工作目录，这样 "assets/xxx" 才能读到。
+# 用 ALL 目标而不是 POST_BUILD —— POST_BUILD 只在 Demo 重新链接时才触发，
+# 只改 shader 的话永远不会被拷过去。
+add_custom_target(CopyAssets ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/assets"
             "$<TARGET_FILE_DIR:Demo>/assets"
-    COMMENT "Copying assets to output directory")
+    COMMENT "Syncing assets to output directory"
+    VERBATIM)
+
+# 等 Demo 链接完（输出目录确定）再拷
+add_dependencies(CopyAssets Demo)
 
 # .sln 模式下额外把工作目录设成源码目录（CMake 文件夹模式不认这条，但不冲突）
 set_target_properties(Demo PROPERTIES

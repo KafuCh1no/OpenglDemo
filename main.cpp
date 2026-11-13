@@ -11,6 +11,26 @@
 #include "CShader.h"
 #include "CMesh.h"
 #include "CCollision.h"
+#include "CShadow.h"
+
+struct CLight
+{
+	glm::vec3 Position;
+	glm::vec3 direction;
+	glm::vec3 color;
+	float intensity = 1.0f;
+	float range = 10.0f;
+	// 内锥角（度），传 shader 前再转 cos
+	float cutoffDeg = 30.0f;
+	// 外锥角（度），阴影 Pass 直接用
+	float outerCutoffDeg = 45.0f;
+	// 0为点光源 1为聚光灯
+	int type = 1;
+
+};
+
+std::vector<CLight> lights;
+std::vector<std::unique_ptr<CShadow>> shadowPasses;
 
 // ============ 相机状态（第一人称） ============
 glm::vec3 cameraPos(0.0f, 1.7f, 8.0f);
@@ -50,6 +70,7 @@ void mouseCallback(GLFWwindow*, double xposIn, double yposIn)
 	yaw += xoffset;
 	pitch += yoffset;
 	pitch = glm::clamp(pitch, -89.0f, 89.0f);
+	// 固定垂直视角在89度以内，防止view矩阵为0
 	cameraFront = glm::normalize(glm::vec3(
 		cos(glm::radians(yaw)) * cos(glm::radians(pitch)),
 		sin(glm::radians(pitch)),
@@ -151,6 +172,7 @@ int main()
 		std::cout << "[main] failed to init glad\n";
 		return -1;
 	}
+	glfwSwapInterval(0);
 
 	glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
 	glfwSetCursorPosCallback(window, mouseCallback);
@@ -193,6 +215,37 @@ int main()
 
 	CShader shader("assets/shaders/horror.vert", "assets/shaders/horror.frag");
 
+	// ================= 光源列表（复用全局 lights） =================
+	lights.reserve(8);
+
+	// 0 号：手电筒（位置/朝向每帧跟随相机）
+	CLight flashlight;
+	flashlight.type        = 1;
+	flashlight.color       = glm::vec3(1.0f);
+	flashlight.intensity   = 2.5f;
+	flashlight.cutoffDeg      = 10.0f;
+	flashlight.outerCutoffDeg = 25.0f;
+	lights.push_back(flashlight);
+
+	// 两盏壁灯（点光）
+	CLight lamp;
+	lamp.type      = 0;
+	lamp.color     = glm::vec3(1.0f, 0.55f, 0.25f);
+	lamp.intensity = 5.0f;
+	lamp.Position  = glm::vec3(-9.0f, 3.2f, -9.0f);
+	lights.push_back(lamp);
+	lamp.Position  = glm::vec3(9.0f, 3.2f, 9.0f);
+	lights.push_back(lamp);
+
+	// 每帧往 shader 传的数组缓冲（复用，避免每帧重新分配）
+	std::vector<glm::vec3> lPos, lDir, lColor;
+	std::vector<float>     lIntensity, lCutoff, lOuterCutoff;
+	std::vector<int>       lType;
+	for (const CLight& l : lights)
+	{
+		shadowPasses.push_back(std::make_unique<CShadow>(1024));
+	}
+		
 	while (!glfwWindowShouldClose(window))
 	{
 		float curFrame = (float)glfwGetTime();
@@ -200,6 +253,8 @@ int main()
 		lastFrame = curFrame;
 
 		processInput(window, boxes);
+
+		const int lightCount = (int)lights.size();
 
 		// 手电筒开关
 		if (glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS)     flashlightOn = true;
@@ -216,17 +271,54 @@ int main()
 		glm::vec3 right = glm::normalize(glm::cross(cameraFront, cameraUp));
 		glm::vec3 lightDir = glm::normalize(cameraFront + right * sway);
 
+		// 0 号灯跟随相机（手电筒拿在手里）—— 必须在阴影 Pass 之前更新
+		lights[0].Position  = cameraPos;
+		lights[0].direction = lightDir;
+		lights[0].intensity = flashlightOn ? 2.5f : 0.0f;
+
+		// 第一遍：从光源视角把场景渲染进各自的深度图
+		for (int i = 0; i < lightCount; ++i)
+		{
+			if (lights[i].type != 1) continue;   // 点光源不能用 2D 深度图，先跳过
+			shadowPasses[i]->Render(cMesh, lights[i].Position, lights[i].direction,
+				lights[i].outerCutoffDeg, 0.1f, 50.0f);
+		}
+
+		// 打包成 shader 需要的数组
+		lPos.clear(); lDir.clear(); lColor.clear();
+		lIntensity.clear(); lCutoff.clear(); lOuterCutoff.clear(); lType.clear();
+		for (const CLight& l : lights)
+		{
+			lPos.push_back(l.Position);
+			lDir.push_back(l.direction);
+			lColor.push_back(l.color);
+			lIntensity.push_back(l.intensity);
+			lCutoff.push_back(glm::cos(glm::radians(l.cutoffDeg)));
+			lOuterCutoff.push_back(glm::cos(glm::radians(l.outerCutoffDeg)));
+			lType.push_back(l.type);
+		}
+
 		shader.use();
 		shader.setMat4("projection", projection);
 		shader.setMat4("view", view);
 		shader.setVec3("viewPos", cameraPos);
-		shader.setVec3("lightPos", cameraPos);
-		shader.setVec3("lightDir", lightDir);
-		shader.setVec3("lightColor", flashlightOn ? glm::vec3(2.5f, 2.5f, 2.5f) : glm::vec3(0.0f));
-		shader.setFloat("cutoff", glm::cos(glm::radians(10.0f)));      // 内锥 10°
-		shader.setFloat("outerCutoff", glm::cos(glm::radians(25.0f))); // 外锥 25°
 
 
+		shader.setInt("lightCount", lightCount);
+		shader.setVec3Array("lightPos[0]",          lPos.data(),           lightCount);
+		shader.setVec3Array("lightDirArr[0]",       lDir.data(),           lightCount);
+		shader.setVec3Array("lightColorArr[0]",     lColor.data(),         lightCount);
+		shader.setFloatArray("lightIntensity[0]",   lIntensity.data(),     lightCount);
+		shader.setFloatArray("lightCutoff[0]",      lCutoff.data(),        lightCount);
+		shader.setFloatArray("lightOuterCutoff[0]", lOuterCutoff.data(),   lightCount);
+		shader.setIntArray("lightType[0]",          lType.data(),          lightCount);
+
+		// 主 Pass 用 0 号灯（手电筒）的深度图和矩阵
+		shader.setMat4("lightSpaceMatrix", shadowPasses[0]->GetLightSpace());
+
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, shadowPasses[0]->GetDepthTexture());
+		shader.setInt("shadowMap", 0);
 
 		cMesh.Draw();
 

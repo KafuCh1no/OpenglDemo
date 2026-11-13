@@ -21,6 +21,11 @@ public:
     void setVec3(const std::string& name, const glm::vec3& value) const;
     void setMat4(const std::string& name, const glm::mat4& mat) const;
 
+    // ---- 数组版：name 要带下标，如 "lightPos[0]"，一次填满整个数组 ----
+    void setVec3Array(const std::string& name, const glm::vec3* data, int count) const;
+    void setFloatArray(const std::string& name, const float* data, int count) const;
+    void setIntArray(const std::string& name, const int* data, int count) const;
+
 private:
     void checkCompileErrors(unsigned int shader, const std::string& type);
 };
