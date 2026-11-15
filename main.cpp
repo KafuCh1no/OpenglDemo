@@ -2,6 +2,9 @@
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_opengl3.h"
 
 #include <cmath>
 #include <filesystem>
@@ -16,7 +19,7 @@
 struct CLight
 {
 	glm::vec3 Position;
-	glm::vec3 direction;
+	glm::vec3 direction = glm::vec3(0.0f, 0.0f, -1.0f);
 	glm::vec3 color;
 	float intensity = 1.0f;
 	float range = 10.0f;
@@ -33,7 +36,7 @@ std::vector<CLight> lights;
 std::vector<std::unique_ptr<CShadow>> shadowPasses;
 
 // ============ 相机状态（第一人称） ============
-glm::vec3 cameraPos(0.0f, 1.7f, 8.0f);
+glm::vec3 cameraPos(1.0f, 1.7f, 9.2f);
 glm::vec3 cameraFront(0.0f, 0.0f, -1.0f);
 glm::vec3 cameraUp(0.0f, 1.0f, 0.0f);
 float yaw = -90.0f;
@@ -160,7 +163,7 @@ int main()
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-	GLFWwindow* window = glfwCreateWindow(1280, 720, "Horror Demo", nullptr, nullptr);
+	GLFWwindow* window = glfwCreateWindow(2440, 1240, "Horror Demo", nullptr, nullptr);
 	if (!window)
 	{
 		std::cout << "[main] failed to create window\n"; glfwTerminate(); return -1;
@@ -181,32 +184,74 @@ int main()
 	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_CULL_FACE);
 
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+	ImGuiIO& io = ImGui::GetIO();
+	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+	ImGui::StyleColorsDark();
+	ImGui::GetIO().FontGlobalScale = 1.7f;
+
+	ImGui_ImplGlfw_InitForOpenGL(window, true);
+	ImGui_ImplOpenGL3_Init("#version 330");
+
 	// ================= 场景：一个 20×20×4 的封闭房间 =================
 	std::vector<float> verts;
 	std::vector<unsigned int> indices;
 	std::vector<Box> boxes;          // 碰撞盒：由 appendBoxMesh 顺手收集
 	boxes.reserve(16);
-
+	 
 	const glm::vec3 floorColor(0.35f, 0.32f, 0.28f);
 	const glm::vec3 wallColor(0.45f, 0.43f, 0.40f);
 	const glm::vec3 pillarColor(0.30f, 0.22f, 0.18f);
 	const glm::vec3 crateColor(0.50f, 0.38f, 0.22f);
 
-	appendBoxMesh(verts, indices, -10, -0.5f, -10, 10, 0, 10, floorColor, boxes);       // 地板
-	appendBoxMesh(verts, indices, -10, 4, -10, 10, 4.5f, 10, wallColor, boxes);         // 天花板
-	appendBoxMesh(verts, indices, -10.5f, 0, -10.5f, 10.5f, 4, -10, wallColor, boxes);  // 北墙
-	appendBoxMesh(verts, indices, -10.5f, 0, 10, 10.5f, 4, 10.5f, wallColor, boxes);    // 南墙
-	appendBoxMesh(verts, indices, -10.5f, 0, -10, -10, 4, 10, wallColor, boxes);        // 西墙
-	appendBoxMesh(verts, indices, 10, 0, -10, 10.5f, 4, 10, wallColor, boxes);          // 东墙
+	// ===== 布局 =====
+	//   厨房/餐厅 : x -10..4,  z 0..10
+	//   走廊      : x -10..-7, z -16..0  (3 米宽, 16 米长)
+	//   洗手间    : x -7..-1,  z -15..-11 (6 x 4)，门在走廊右侧 z -14..-12.4（1.6 米宽）
 
-	for (float x : {-5.0f, 5.0f})                                          // 4 根柱子
-		for (float z : {-5.0f, 5.0f})
-			appendBoxMesh(verts, indices, x - 0.4f, 0, z - 0.4f, x + 0.4f, 4, z + 0.4f, pillarColor, boxes);
+	// 地面 / 天花板（三块，跟着房间走）
+	appendBoxMesh(verts, indices, -10.0f, -0.5f, 0.0f, 4.0f, 0.0f, 10.0f, floorColor, boxes);
+	appendBoxMesh(verts, indices, -10.0f, -0.5f, -16.0f, -7.0f, 0.0f, 0.0f, floorColor, boxes);
+	appendBoxMesh(verts, indices, -7.0f, -0.5f, -15.0f, -1.0f, 0.0f, -11.0f, floorColor, boxes);
 
-	appendBoxMesh(verts, indices, 2.0f, 0, -3.0f, 3.2f, 1.2f, -1.8f, crateColor, boxes);          // 几个木箱
-	appendBoxMesh(verts, indices, -4.0f, 0, 2.5f, -2.8f, 1.2f, 3.7f, crateColor, boxes);
-	appendBoxMesh(verts, indices, -3.8f, 1.2f, 2.7f, -3.0f, 2.0f, 3.5f, crateColor, boxes);       // 叠一个
-	appendBoxMesh(verts, indices, 6.5f, 0, 6.5f, 7.7f, 1.2f, 7.7f, crateColor, boxes);
+	appendBoxMesh(verts, indices, -10.0f, 4.0f, 0.0f, 4.0f, 4.5f, 10.0f, wallColor, boxes);
+	appendBoxMesh(verts, indices, -10.0f, 4.0f, -16.0f, -7.0f, 4.5f, 0.0f, wallColor, boxes);
+	appendBoxMesh(verts, indices, -7.0f, 4.0f, -15.0f, -1.0f, 4.5f, -11.0f, wallColor, boxes);
+
+	// ---- 厨房 / 餐厅 ----
+	appendBoxMesh(verts, indices, -10.5f, 0.0f, 10.0f, 0.0f, 4.0f, 10.5f, wallColor, boxes);  // 南墙（门洞 x 0..2）
+	appendBoxMesh(verts, indices, 2.0f, 0.0f, 10.0f, 4.5f, 4.0f, 10.5f, wallColor, boxes);
+	appendBoxMesh(verts, indices, 4.0f, 0.0f, -0.5f, 4.5f, 4.0f, 10.5f, wallColor, boxes);  // 东墙
+	appendBoxMesh(verts, indices, -10.5f, 0.0f, -0.5f, -10.0f, 4.0f, 10.5f, wallColor, boxes); // 西墙
+	appendBoxMesh(verts, indices, -7.0f, 0.0f, -0.5f, 4.5f, 4.0f, 0.0f, wallColor, boxes);  // 北墙（走廊开口 x -10..-7）
+
+	// ---- 走廊（3 米宽，16 米长）----
+	appendBoxMesh(verts, indices, -10.5f, 0.0f, -16.5f, -10.0f, 4.0f, 0.0f, wallColor, boxes); // 西墙
+	appendBoxMesh(verts, indices, -10.5f, 0.0f, -16.5f, -6.5f, 4.0f, -16.0f, wallColor, boxes); // 尽头墙
+	appendBoxMesh(verts, indices, -7.0f, 0.0f, -16.0f, -6.5f, 4.0f, -14.0f, wallColor, boxes); // 东墙（北段）
+	appendBoxMesh(verts, indices, -7.0f, 0.0f, -12.4f, -6.5f, 4.0f, 0.0f, wallColor, boxes); // 东墙（南段）
+
+	// ---- 洗手间（6 x 4，门 1.6 米宽）----
+	appendBoxMesh(verts, indices, -7.0f, 0.0f, -15.5f, -0.5f, 4.0f, -15.0f, wallColor, boxes); // 北墙
+	appendBoxMesh(verts, indices, -1.0f, 0.0f, -15.5f, -0.5f, 4.0f, -10.5f, wallColor, boxes); // 东墙
+	appendBoxMesh(verts, indices, -7.0f, 0.0f, -11.0f, -0.5f, 4.0f, -10.5f, wallColor, boxes); // 南墙
+
+	// ---- 厨房家具 ----
+	const glm::vec3 woodColor(0.32f, 0.20f, 0.12f);
+	const glm::vec3 candleColor(0.92f, 0.86f, 0.70f);
+
+	appendBoxMesh(verts, indices, -4.6f, 0.0f, 3.9f, -1.4f, 0.78f, 7.1f, woodColor, boxes);       // 餐桌
+	appendBoxMesh(verts, indices, -3.06f, 0.78f, 5.44f, -2.90f, 1.14f, 5.60f, candleColor, boxes); // 蜡烛
+	appendBoxMesh(verts, indices, -5.6f, 0.0f, 4.4f, -4.9f, 0.9f, 5.1f, woodColor, boxes);         // 椅子
+	appendBoxMesh(verts, indices, -1.1f, 0.0f, 4.4f, -0.4f, 0.9f, 5.1f, woodColor, boxes);
+	appendBoxMesh(verts, indices, -5.6f, 0.0f, 5.9f, -4.9f, 0.9f, 6.6f, woodColor, boxes);
+	appendBoxMesh(verts, indices, -1.1f, 0.0f, 5.9f, -0.4f, 0.9f, 6.6f, woodColor, boxes);
+	appendBoxMesh(verts, indices, 2.2f, 0.0f, 0.6f, 3.9f, 2.4f, 2.0f, pillarColor, boxes);       // 壁炉
+
+	// ---- 洗手间 ----
+	appendBoxMesh(verts, indices, -6.0f, 0.0f, -14.6f, -4.0f, 0.9f, -13.9f, wallColor, boxes);     // 洗手台
+	appendBoxMesh(verts, indices, -6.1f, 1.2f, -15.0f, -3.9f, 2.7f, -14.9f, pillarColor, boxes);   // 镜子
 
 	CMesh cMesh;
 	cMesh.Upload(verts, indices);
@@ -218,29 +263,43 @@ int main()
 	// ================= 光源列表（复用全局 lights） =================
 	lights.reserve(8);
 
-	// 0 号：手电筒（位置/朝向每帧跟随相机）
+	// 0 号灯：壁炉（固定位置，唯一投影的灯）
+	CLight fireplace;
+	fireplace.type            = 1;
+	fireplace.color           = glm::vec3(1.0f, 0.55f, 0.25f);
+	fireplace.intensity       = 10.0f;
+	fireplace.Position        = glm::vec3(3.0f, 1.2f, 2.4f);   // 火口外侧，别埋进壁炉盒子里
+	fireplace.direction       = glm::normalize(glm::vec3(-1.0f, -0.30f, 1.0f));
+	fireplace.cutoffDeg       = 14.0f;
+	fireplace.outerCutoffDeg  = 30.0f;
+	lights.push_back(fireplace);
+
 	CLight flashlight;
-	flashlight.type        = 1;
-	flashlight.color       = glm::vec3(1.0f);
-	flashlight.intensity   = 2.5f;
+	flashlight.type           = 1;
+	flashlight.color          = glm::vec3(1.0f);
+	flashlight.intensity      = 2.5f;
 	flashlight.cutoffDeg      = 10.0f;
 	flashlight.outerCutoffDeg = 25.0f;
 	lights.push_back(flashlight);
 
-	// 两盏壁灯（点光）
-	CLight lamp;
-	lamp.type      = 0;
-	lamp.color     = glm::vec3(1.0f, 0.55f, 0.25f);
-	lamp.intensity = 5.0f;
-	lamp.Position  = glm::vec3(-9.0f, 3.2f, -9.0f);
+	CLight lamp = fireplace;
+	lamp.Position = glm::vec3(-4.0f, 3.0f, -13.0f);
+	lamp.direction = glm::normalize(glm::vec3(0.0f, -0.3f, 1.0f));
 	lights.push_back(lamp);
-	lamp.Position  = glm::vec3(9.0f, 3.2f, 9.0f);
-	lights.push_back(lamp);
+
+	// 3 号：蜡烛（点光源，不投影）
+	CLight candle;
+	candle.type      = 0;
+	candle.color     = glm::vec3(1.0f, 0.62f, 0.30f);
+	candle.intensity = 2.2f;
+	candle.Position  = glm::vec3(-2.98f, 1.15f, 5.52f);
+	lights.push_back(candle);
 
 	// 每帧往 shader 传的数组缓冲（复用，避免每帧重新分配）
 	std::vector<glm::vec3> lPos, lDir, lColor;
 	std::vector<float>     lIntensity, lCutoff, lOuterCutoff;
 	std::vector<int>       lType;
+	std::vector<glm::mat4> shadowMatrices;
 	for (const CLight& l : lights)
 	{
 		shadowPasses.push_back(std::make_unique<CShadow>(1024));
@@ -263,7 +322,10 @@ int main()
 		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-		glm::mat4 projection = glm::perspective(glm::radians(60.0f), 1280.0f / 720.0f, 0.1f, 100.0f);
+		int fbw = 0, fbh = 0;
+		glfwGetFramebufferSize(window, &fbw, &fbh);
+		glm::mat4 projection = glm::perspective(glm::radians(60.0f),
+			(float)fbw / (float)fbh, 0.1f, 100.0f);
 		glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
 
 		// 手电筒 = 相机位置 + 相机朝向（加一点手持摇摆）
@@ -271,17 +333,20 @@ int main()
 		glm::vec3 right = glm::normalize(glm::cross(cameraFront, cameraUp));
 		glm::vec3 lightDir = glm::normalize(cameraFront + right * sway);
 
-		// 0 号灯跟随相机（手电筒拿在手里）—— 必须在阴影 Pass 之前更新
-		lights[0].Position  = cameraPos;
-		lights[0].direction = lightDir;
-		lights[0].intensity = flashlightOn ? 2.5f : 0.0f;
+		// 1 号灯：手电筒跟随相机（不投影）
+		lights[1].Position  = cameraPos;
+		lights[1].direction = lightDir;
+		lights[1].intensity = flashlightOn ? 2.5f : 0.0f;
 
 		// 第一遍：从光源视角把场景渲染进各自的深度图
+		shadowMatrices.assign(lightCount, glm::mat4(1.0f));
+
 		for (int i = 0; i < lightCount; ++i)
 		{
 			if (lights[i].type != 1) continue;   // 点光源不能用 2D 深度图，先跳过
 			shadowPasses[i]->Render(cMesh, lights[i].Position, lights[i].direction,
 				lights[i].outerCutoffDeg, 0.1f, 50.0f);
+			shadowMatrices[i] = shadowPasses[i]->GetLightSpace();
 		}
 
 		// 打包成 shader 需要的数组
@@ -313,18 +378,57 @@ int main()
 		shader.setFloatArray("lightOuterCutoff[0]", lOuterCutoff.data(),   lightCount);
 		shader.setIntArray("lightType[0]",          lType.data(),          lightCount);
 
-		// 主 Pass 用 0 号灯（手电筒）的深度图和矩阵
-		shader.setMat4("lightSpaceMatrix", shadowPasses[0]->GetLightSpace());
+		// 纹理单元计数器
+		int shadowUnit = 0;
 
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, shadowPasses[0]->GetDepthTexture());
-		shader.setInt("shadowMap", 0);
+		for (int i = 0; i < lightCount; ++i)
+		{
+			// 跳过点光源 因为点光源不用2D阴影贴图
+			if (lights[i].type != 1)
+			{
+				continue;
+			}
+			glActiveTexture(GL_TEXTURE0 + shadowUnit);
+			glBindTexture(GL_TEXTURE_2D, shadowPasses[i]->GetDepthTexture());
+			shader.setInt("shadowMap" + std::to_string(i), shadowUnit);
+			++shadowUnit;
+		}
+		// 光源的相机矩阵
+		shader.setMat4Array("lightSpaceMatrices[0]", shadowMatrices.data(), lightCount);
 
 		cMesh.Draw();
+
+		// ImGui
+		ImGui_ImplOpenGL3_NewFrame();
+		ImGui_ImplGlfw_NewFrame();
+		ImGui::NewFrame();
+
+		ImGui::SetNextWindowSize(ImVec2(460, 640), ImGuiCond_FirstUseEver);
+		ImGui::SetNextWindowPos(ImVec2(12, 12), ImGuiCond_FirstUseEver);
+		ImGui::Begin("ImGui");
+		ImGui::Text("FPS %.1f", ImGui::GetIO().Framerate);
+
+		for (int i = 0; i < (int)lights.size(); ++i)
+		{
+			ImGui::PushID(i);
+			ImGui::Text("Light %d", i);
+			ImGui::DragFloat3("position", &lights[i].Position.x, 0.05f);
+			ImGui::SliderFloat("intensity", &lights[i].intensity, 0.0f, 20.0f);
+			ImGui::ColorEdit3("color", &lights[i].color.x);
+			ImGui::PopID();
+		}
+		ImGui::End();
+
+		ImGui::Render();
+		ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
 		glfwSwapBuffers(window);
 		glfwPollEvents();
 	}
+
+	ImGui_ImplOpenGL3_Shutdown();
+	ImGui_ImplGlfw_Shutdown();
+	ImGui::DestroyContext();
 
 	glfwTerminate();
 	return 0;

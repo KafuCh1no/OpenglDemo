@@ -19,10 +19,13 @@ uniform float lightCutoff[MAX_LIGHTS];       // 内锥 cos 值
 uniform float lightOuterCutoff[MAX_LIGHTS];  // 外锥 cos 值
 uniform int   lightType[MAX_LIGHTS];         // 0 = 点光, 1 = 聚光
 
-uniform sampler2D shadowMap;   // 只对手电筒（0 号灯）生效
+uniform sampler2D shadowMap0;
+uniform sampler2D shadowMap1;
+uniform sampler2D shadowMap2;
+uniform mat4 lightSpaceMatrices[MAX_LIGHTS];
 uniform vec3 viewPos;
 
-float ShadowCalculation(vec4 fragPosLightSpace);   // 前向声明：定义在文件末尾
+float ShadowCalculation(vec4 fragPosLightSpace, sampler2D shadowMap);   // 前向声明：定义在文件末尾
 
 void main()
 {
@@ -30,7 +33,7 @@ void main()
     vec3 V = normalize(viewPos - WorldPos);         // 片元 -> 眼睛
 
     // 阴影只压 0 号灯（手电筒），其他灯照常照亮
-    float shadow = ShadowCalculation(vLightSpacePos);
+
 
     vec3 result = 0.03 * ObjectColor;               // 极弱环境光，营造黑暗
 
@@ -61,8 +64,16 @@ void main()
 
         vec3 radiance = lightColorArr[i] * lightIntensity[i] * attenuation * spot;
 
-        // 只有手电筒会被遮挡
-        float occl = (i == 0) ? (1.0 - shadow) : 1.0;
+        float occl = 1.0;
+        if (lightType[i] == 1)
+        {
+            vec4 lp = lightSpaceMatrices[i] * vec4(WorldPos, 1.0);
+            float shadow = 0.0;
+            if      (i == 0) shadow = ShadowCalculation(lp, shadowMap0);
+            else if (i == 1) shadow = ShadowCalculation(lp, shadowMap1);
+            else if (i == 2) shadow = ShadowCalculation(lp, shadowMap2);
+            occl = 1.0 - shadow;
+        }
 
         result += occl * (diff * ObjectColor + 0.3 * spec) * radiance;
     }
@@ -74,23 +85,22 @@ void main()
     FragColor = vec4(result, 1.0);
 }
 
-float ShadowCalculation(vec4 fragPosLightSpace)
+// 阴影计算
+float ShadowCalculation(vec4 fragPosLightSpace, sampler2D shadowMap)
 {
-    // 透视除法
     vec3 proj = fragPosLightSpace.xyz / fragPosLightSpace.w;
-    // 映射到纹理坐标 [0, 1]
     proj = proj * 0.5 + 0.5;
 
-    // 光源外当作不在阴影
+    // outside the light frustum -> treat as lit
     if (proj.z > 1.0 || proj.x < 0.0 || proj.x > 1.0 || proj.y < 0.0 || proj.y > 1.0)
     {
         return 0.0;
     }
 
-    // 贴图记录的「这个方向最近的遮挡距离」 vs 当前片元自己的深度
     float closestDepth = texture(shadowMap, proj.xy).r;
     float currentDepth = proj.z;
 
-    // 比记录的远 = 前面有东西挡着 = 在阴影里
-    return currentDepth - 0.005 > closestDepth ? 1.0 : 0.0;
+    // bias用来区分"真的被挡住"和"深度比较的误差",目前暂时用不到
+    float bias = 0.0002;   // 5 cm
+    return currentDepth > closestDepth ? 1.0 : 0.0;
 }

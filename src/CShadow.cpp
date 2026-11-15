@@ -79,7 +79,14 @@ void CShadow::Render(const CMesh& mesh,
 
 	m_depthShader.use();
 	m_depthShader.setMat4("lightSpaceMatrix", m_lightSpace);
+
+	// 只画背面
+	glEnable(GL_CULL_FACE);
+	glCullFace(GL_FRONT);
 	mesh.Draw();
+	// 恢复
+	glCullFace(GL_BACK);
+	glDisable(GL_CULL_FACE);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	glViewport(vp[0], vp[1], vp[2], vp[3]);

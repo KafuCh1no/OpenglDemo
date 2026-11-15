@@ -94,6 +94,12 @@ void CShader::setIntArray(const std::string& name, const int* data, int count) c
     glUniform1iv(glGetUniformLocation(ID, name.c_str()), count, data);
 }
 
+void CShader::setMat4Array(const std::string& name, const glm::mat4* data, int count) const
+{
+    glUniformMatrix4fv(glGetUniformLocation(ID, name.c_str()), count, GL_FALSE,
+                       reinterpret_cast<const float*>(data));
+}
+
 void CShader::checkCompileErrors(unsigned int shader, const std::string& type)
 {
     int success;

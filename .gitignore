@@ -8,3 +8,6 @@ build/
 # 鐢ㄦ埛鏈湴閰嶇疆
 *.user
 CMakeUserPresets.json
+
+# ImGui 本地布局
+imgui.ini

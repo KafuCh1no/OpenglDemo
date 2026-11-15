@@ -19,15 +19,26 @@ set_target_properties(glfw3 PROPERTIES
 # ===== 源文件 =====
 file(GLOB_RECURSE DEMO_SRC CONFIGURE_DEPENDS src/*.cpp)
 
+# ===== ImGui (source-library, compiled into the app) =====
+set(IMGUI_DIR "${THIRD_PARTY}/imgui")
+
 add_executable(Demo
     main.cpp
     ${DEMO_SRC}
-    "${THIRD_PARTY}/glad/src/glad.c")     # glad 直接引用原文件，不用拷贝
+    ${IMGUI_DIR}/imgui.cpp
+    ${IMGUI_DIR}/imgui_draw.cpp
+    ${IMGUI_DIR}/imgui_tables.cpp
+    ${IMGUI_DIR}/imgui_widgets.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
+    "${THIRD_PARTY}/glad/src/glad.c")
 
 target_include_directories(Demo PRIVATE
     src
     "${THIRD_PARTY}"                       # <glm/glm.hpp>、<KHR/khrplatform.h>、<GLFW/glfw3.h>
-    "${THIRD_PARTY}/glad/include")         # <glad/glad.h>
+    "${THIRD_PARTY}/glad/include"          # <glad/glad.h>
+    ${IMGUI_DIR}                           # <imgui.h>
+    ${IMGUI_DIR}/backends)                 # <imgui_impl_glfw.h>
 
 target_link_libraries(Demo PRIVATE
     glfw3 opengl32 user32 gdi32 shell32)

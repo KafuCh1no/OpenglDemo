@@ -25,6 +25,7 @@ public:
     void setVec3Array(const std::string& name, const glm::vec3* data, int count) const;
     void setFloatArray(const std::string& name, const float* data, int count) const;
     void setIntArray(const std::string& name, const int* data, int count) const;
+    void setMat4Array(const std::string& name, const glm::mat4* data, int count) const;
 
 private:
     void checkCompileErrors(unsigned int shader, const std::string& type);
