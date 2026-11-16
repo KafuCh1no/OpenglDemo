@@ -12,47 +12,29 @@
 #include <vector>
 
 #include "CShader.h"
-#include "CMesh.h"
-#include "CCollision.h"
-#include "CShadow.h"
+#include "CScene.h"
+#include "CTexture.h"
 
-struct CLight
-{
-	glm::vec3 Position;
-	glm::vec3 direction = glm::vec3(0.0f, 0.0f, -1.0f);
-	glm::vec3 color;
-	float intensity = 1.0f;
-	float range = 10.0f;
-	// 内锥角（度），传 shader 前再转 cos
-	float cutoffDeg = 30.0f;
-	// 外锥角（度），阴影 Pass 直接用
-	float outerCutoffDeg = 45.0f;
-	// 0为点光源 1为聚光灯
-	int type = 1;
+// ============ 全局场景（相机 / 几何 / 灯光 / 阴影 / 碰撞都在里面） ============
+CScene gScene;
 
-};
-
-std::vector<CLight> lights;
-std::vector<std::unique_ptr<CShadow>> shadowPasses;
-
-// ============ 相机状态（第一人称） ============
-glm::vec3 cameraPos(1.0f, 1.7f, 9.2f);
-glm::vec3 cameraFront(0.0f, 0.0f, -1.0f);
-glm::vec3 cameraUp(0.0f, 1.0f, 0.0f);
-float yaw = -90.0f;
-float pitch = 0.0f;
+// ============ 输入状态 ============
 float lastX = 640.0f, lastY = 360.0f;
 bool  firstMouse = true;
 float deltaTime = 0.0f, lastFrame = 0.0f;
-// 手电筒开关
+
+// 手电筒开关（对应 gScene.Lights() 里的手电筒灯）
 bool flashlightOn = true;
+
 // 鼠标是否锁定：true = 转视角（光标隐藏），false = 显示光标（可点 UI）
 bool mouseCaptured = true;
 
-// 玩家碰撞半径（肩宽的一半）：越大离墙越远
+// 玩家碰撞半径（肩宽的一半）与眼睛到脚底的高度
 constexpr float kPlayerRadius = 0.3f;
-// 玩家眼睛到脚底的高度
 constexpr float kPlayerHeight = 1.7f;
+
+// 手电筒在光源列表里的下标
+constexpr int kFlashlightIndex = 1;
 
 // ============ 回调 ============
 void framebufferSizeCallback(GLFWwindow*, int w, int h)
@@ -67,21 +49,15 @@ void mouseCallback(GLFWwindow*, double xposIn, double yposIn)
 
 	float xpos = (float)xposIn, ypos = (float)yposIn;
 	if (firstMouse) { lastX = xpos; lastY = ypos; firstMouse = false; }
-	float xoffset = (xpos - lastX) * 0.1f;
-	float yoffset = (lastY - ypos) * 0.1f;
+	float xoffset = (xpos - lastX) * 0.5f;
+	float yoffset = (lastY - ypos) * 0.5f;
 	lastX = xpos; lastY = ypos;
-	yaw += xoffset;
-	pitch += yoffset;
-	pitch = glm::clamp(pitch, -89.0f, 89.0f);
-	// 固定垂直视角在89度以内，防止view矩阵为0
-	cameraFront = glm::normalize(glm::vec3(
-		cos(glm::radians(yaw)) * cos(glm::radians(pitch)),
-		sin(glm::radians(pitch)),
-		sin(glm::radians(yaw)) * cos(glm::radians(pitch))));
+
+	gScene.RotateByMouse(xoffset, yoffset);
 }
 
 // 键盘回调：只在「按下」瞬间触发一次，适合做开关类操作（Tab 切换光标）
-void keyCallback(GLFWwindow* window, int key, int /*scancode*/, int action, int /*mods*/)
+void keyCallback(GLFWwindow* window, int key, int, int action, int)
 {
 	if (action != GLFW_PRESS) return;    // 忽略 GLFW_REPEAT，长按不会反复触发
 
@@ -94,7 +70,7 @@ void keyCallback(GLFWwindow* window, int key, int /*scancode*/, int action, int 
 	}
 }
 
-void processInput(GLFWwindow* window, const std::vector<Box>& boxes)
+void processInput(GLFWwindow* window)
 {
 	if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
 		glfwSetWindowShouldClose(window, true);
@@ -102,56 +78,19 @@ void processInput(GLFWwindow* window, const std::vector<Box>& boxes)
 	if (!mouseCaptured) return;      // Tab 放开鼠标时冻结移动
 
 	// ① 先算出「期望位移」
-	float speed = 3.0f * deltaTime;
-	glm::vec3 right = glm::normalize(glm::cross(cameraFront, cameraUp));
+	const float speed = 3.0f * deltaTime;
+	const glm::vec3 front = gScene.GetFront();
+	const glm::vec3 right = gScene.GetRight();
 	glm::vec3 delta(0.0f);
 
-	if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) delta += cameraFront * speed;
-	if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) delta -= cameraFront * speed;
+	if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) delta += front * speed;
+	if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) delta -= front * speed;
 	if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) delta -= right * speed;
 	if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) delta += right * speed;
 
-	// ② 再交给碰撞求解，决定实际能走多少
+	// ② 再交给场景的碰撞求解，决定实际能走多少
 	if (glm::length(delta) > 1e-6f)
-		cameraPos = CCollision::MoveWithCollision(cameraPos, delta, kPlayerRadius, kPlayerHeight, boxes);
-}
-
-/**
- * 将AABB转换成顶点数据和索引数据
- */
-void appendBoxMesh(std::vector<float>& verts, std::vector<unsigned int>& indices,
-	float x0, float y0, float z0, float x1, float y1, float z1,
-	const glm::vec3& color, std::vector<Box>& boxes)
-{
-	unsigned int base = (unsigned int)(verts.size() / 11);   // 每个顶点 11 个 float
-	struct Face { glm::vec3 n; glm::vec3 v[4]; };
-	Face faces[6] = {
-		{ { 0, 0, 1}, {{x0,y0,z1},{x1,y0,z1},{x1,y1,z1},{x0,y1,z1}} },  // +Z
-		{ { 0, 0,-1}, {{x1,y0,z0},{x0,y0,z0},{x0,y1,z0},{x1,y1,z0}} },  // -Z
-		{ { 1, 0, 0}, {{x1,y0,z1},{x1,y0,z0},{x1,y1,z0},{x1,y1,z1}} },  // +X
-		{{-1, 0, 0}, {{x0,y0,z0},{x0,y0,z1},{x0,y1,z1},{x0,y1,z0}} },   // -X
-		{ { 0, 1, 0}, {{x0,y1,z1},{x1,y1,z1},{x1,y1,z0},{x0,y1,z0}} },  // +Y
-		{ { 0,-1, 0}, {{x0,y0,z0},{x1,y0,z0},{x1,y0,z1},{x0,y0,z1}} },  // -Y
-	};
-	// 每个面 4 个角的 UV，顺序要和 Face.v 一致：左下、右下、右上、左上
-	static const glm::vec2 kQuadUV[4] = { {0.0f,0.0f}, {1.0f,0.0f}, {1.0f,1.0f}, {0.0f,1.0f} };
-
-	for (auto& f : faces)
-	{
-		for (int i = 0; i < 4; ++i)
-		{
-			const glm::vec3& c = f.v[i];
-			verts.push_back(c.x); verts.push_back(c.y); verts.push_back(c.z);
-			verts.push_back(f.n.x); verts.push_back(f.n.y); verts.push_back(f.n.z);
-			verts.push_back(color.r); verts.push_back(color.g); verts.push_back(color.b);
-			verts.push_back(kQuadUV[i].x); verts.push_back(kQuadUV[i].y);   // ← 新增 UV
-		}
-		indices.insert(indices.end(), { base, base + 1, base + 2, base, base + 2, base + 3 });
-		base += 4;
-	}
-
-	// 顺手记录碰撞盒：渲染和碰撞同源，永远不会脱节
-	boxes.push_back({ glm::vec3(x0, y0, z0), glm::vec3(x1, y1, z1) });
+		gScene.MoveCamera(delta, kPlayerRadius, kPlayerHeight);
 }
 
 int main()
@@ -163,7 +102,7 @@ int main()
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-	GLFWwindow* window = glfwCreateWindow(2440, 1240, "Horror Demo", nullptr, nullptr);
+	GLFWwindow* window = glfwCreateWindow(1800, 1000, "Horror Demo", nullptr, nullptr);
 	if (!window)
 	{
 		std::cout << "[main] failed to create window\n"; glfwTerminate(); return -1;
@@ -194,98 +133,111 @@ int main()
 	ImGui_ImplGlfw_InitForOpenGL(window, true);
 	ImGui_ImplOpenGL3_Init("#version 330");
 
-	// ================= 场景：一个 20×20×4 的封闭房间 =================
-	std::vector<float> verts;
-	std::vector<unsigned int> indices;
-	std::vector<Box> boxes;          // 碰撞盒：由 appendBoxMesh 顺手收集
-	boxes.reserve(16);
-	 
+	// 场景：按材质分组
 	const glm::vec3 floorColor(0.35f, 0.32f, 0.28f);
-	const glm::vec3 wallColor(0.45f, 0.43f, 0.40f);
+	const glm::vec3 wallColor(0.95f, 0.93f, 0.9f);
+	const glm::vec3 paintedWallColor(0.95f, 0.93f, 0.9f);
 	const glm::vec3 pillarColor(0.30f, 0.22f, 0.18f);
-	const glm::vec3 crateColor(0.50f, 0.38f, 0.22f);
-
-	// ===== 布局 =====
-	//   厨房/餐厅 : x -10..4,  z 0..10
-	//   走廊      : x -10..-7, z -16..0  (3 米宽, 16 米长)
-	//   洗手间    : x -7..-1,  z -15..-11 (6 x 4)，门在走廊右侧 z -14..-12.4（1.6 米宽）
-
-	// 地面 / 天花板（三块，跟着房间走）
-	appendBoxMesh(verts, indices, -10.0f, -0.5f, 0.0f, 4.0f, 0.0f, 10.0f, floorColor, boxes);
-	appendBoxMesh(verts, indices, -10.0f, -0.5f, -16.0f, -7.0f, 0.0f, 0.0f, floorColor, boxes);
-	appendBoxMesh(verts, indices, -7.0f, -0.5f, -15.0f, -1.0f, 0.0f, -11.0f, floorColor, boxes);
-
-	appendBoxMesh(verts, indices, -10.0f, 4.0f, 0.0f, 4.0f, 4.5f, 10.0f, wallColor, boxes);
-	appendBoxMesh(verts, indices, -10.0f, 4.0f, -16.0f, -7.0f, 4.5f, 0.0f, wallColor, boxes);
-	appendBoxMesh(verts, indices, -7.0f, 4.0f, -15.0f, -1.0f, 4.5f, -11.0f, wallColor, boxes);
-
-	// ---- 厨房 / 餐厅 ----
-	appendBoxMesh(verts, indices, -10.5f, 0.0f, 10.0f, 0.0f, 4.0f, 10.5f, wallColor, boxes);  // 南墙（门洞 x 0..2）
-	appendBoxMesh(verts, indices, 2.0f, 0.0f, 10.0f, 4.5f, 4.0f, 10.5f, wallColor, boxes);
-	appendBoxMesh(verts, indices, 4.0f, 0.0f, -0.5f, 4.5f, 4.0f, 10.5f, wallColor, boxes);  // 东墙
-	appendBoxMesh(verts, indices, -10.5f, 0.0f, -0.5f, -10.0f, 4.0f, 10.5f, wallColor, boxes); // 西墙
-	appendBoxMesh(verts, indices, -7.0f, 0.0f, -0.5f, 4.5f, 4.0f, 0.0f, wallColor, boxes);  // 北墙（走廊开口 x -10..-7）
-
-	// ---- 走廊（3 米宽，16 米长）----
-	appendBoxMesh(verts, indices, -10.5f, 0.0f, -16.5f, -10.0f, 4.0f, 0.0f, wallColor, boxes); // 西墙
-	appendBoxMesh(verts, indices, -10.5f, 0.0f, -16.5f, -6.5f, 4.0f, -16.0f, wallColor, boxes); // 尽头墙
-	appendBoxMesh(verts, indices, -7.0f, 0.0f, -16.0f, -6.5f, 4.0f, -14.0f, wallColor, boxes); // 东墙（北段）
-	appendBoxMesh(verts, indices, -7.0f, 0.0f, -12.4f, -6.5f, 4.0f, 0.0f, wallColor, boxes); // 东墙（南段）
-
-	// ---- 洗手间（6 x 4，门 1.6 米宽）----
-	appendBoxMesh(verts, indices, -7.0f, 0.0f, -15.5f, -0.5f, 4.0f, -15.0f, wallColor, boxes); // 北墙
-	appendBoxMesh(verts, indices, -1.0f, 0.0f, -15.5f, -0.5f, 4.0f, -10.5f, wallColor, boxes); // 东墙
-	appendBoxMesh(verts, indices, -7.0f, 0.0f, -11.0f, -0.5f, 4.0f, -10.5f, wallColor, boxes); // 南墙
-
-	// ---- 厨房家具 ----
 	const glm::vec3 woodColor(0.32f, 0.20f, 0.12f);
 	const glm::vec3 candleColor(0.92f, 0.86f, 0.70f);
 
-	appendBoxMesh(verts, indices, -4.6f, 0.0f, 3.9f, -1.4f, 0.78f, 7.1f, woodColor, boxes);       // 餐桌
-	appendBoxMesh(verts, indices, -3.06f, 0.78f, 5.44f, -2.90f, 1.14f, 5.60f, candleColor, boxes); // 蜡烛
-	appendBoxMesh(verts, indices, -5.6f, 0.0f, 4.4f, -4.9f, 0.9f, 5.1f, woodColor, boxes);         // 椅子
-	appendBoxMesh(verts, indices, -1.1f, 0.0f, 4.4f, -0.4f, 0.9f, 5.1f, woodColor, boxes);
-	appendBoxMesh(verts, indices, -5.6f, 0.0f, 5.9f, -4.9f, 0.9f, 6.6f, woodColor, boxes);
-	appendBoxMesh(verts, indices, -1.1f, 0.0f, 5.9f, -0.4f, 0.9f, 6.6f, woodColor, boxes);
-	appendBoxMesh(verts, indices, 2.2f, 0.0f, 0.6f, 3.9f, 2.4f, 2.0f, pillarColor, boxes);       // 壁炉
+	CTexture wallTex("assets/textures/Plaster006_2K-JPG_Color.jpg");
+	CTexture wallNormal("assets/textures/Plaster006_2K-JPG_NormalGL.jpg", false);
+	CTexture paintedWallTex("assets/textures/PaintedPlaster014_2K-JPG_Color.jpg");
+	CTexture paintedWallNormal("assets/textures/PaintedPlaster014_2K-JPG_NormalGL.jpg", false);
+
+	// 四种材质分组（现在都没贴图，靠顶点色区分；以后放上贴图即可）
+	// uScale 现在是「每米重复几次」：0.4 = 每 2.5 米一个循环
+	auto& gWall        = gScene.NewGroup({ &wallTex,        glm::vec3(1.0f), 0.4f, &wallNormal,        1.0f });
+	auto& gPaintedWall = gScene.NewGroup({ &paintedWallTex, glm::vec3(1.0f), 0.25f, &paintedWallNormal, 1.0f });
+	auto& gFloor = gScene.NewGroup({ nullptr, glm::vec3(1.0f), 2.0f });
+	auto& gWood  = gScene.NewGroup({ nullptr, glm::vec3(1.0f), 1.0f });
+	auto& gStone = gScene.NewGroup({ nullptr, glm::vec3(1.0f), 1.0f });
+
+	// ---- 地面 / 天花板 ----
+	gScene.AddBox(gFloor, -10.0f, -0.5f, 0.0f, 4.0f, 0.0f, 10.0f, floorColor);
+	gScene.AddBox(gFloor, -10.0f, -0.5f, -16.0f, -7.0f, 0.0f, 0.0f, floorColor);
+	gScene.AddBox(gFloor, -7.0f, -0.5f, -15.0f, -1.0f, 0.0f, -11.0f, floorColor);
+
+	gScene.AddBox(gFloor, -10.0f, 4.0f, 0.0f, 4.0f, 4.5f, 10.0f, wallColor);
+	gScene.AddBox(gFloor, -10.0f, 4.0f, -16.0f, -7.0f, 4.5f, 0.0f, wallColor);
+	gScene.AddBox(gFloor, -7.0f, 4.0f, -15.0f, -1.0f, 4.5f, -11.0f, wallColor);
+
+	// ---- 厨房 / 餐厅墙 ----
+	gScene.AddBox(gWall, -10.5f, 0.0f, 10.0f, 0.0f, 4.0f, 10.5f, wallColor);   // 南墙（门洞 x 0..2）
+	gScene.AddBox(gWall, 2.0f, 0.0f, 10.0f, 4.5f, 4.0f, 10.5f, wallColor);
+	gScene.AddBox(gPaintedWall, 4.0f, 0.0f, -0.5f, 4.5f, 4.0f, 10.5f, paintedWallColor);     // 东墙
+	gScene.AddBox(gWall, -10.5f, 0.0f, -0.5f, -10.0f, 4.0f, 10.5f, wallColor); // 西墙
+	gScene.AddBox(gWall, -7.0f, 0.0f, -0.5f, 4.5f, 4.0f, 0.0f, wallColor);     // 北墙（走廊开口）
+
+	// ---- 走廊 ----
+	gScene.AddBox(gWall, -10.5f, 0.0f, -16.5f, -10.0f, 4.0f, 0.0f, wallColor); // 西墙
+	gScene.AddBox(gWall, -10.5f, 0.0f, -16.5f, -6.5f, 4.0f, -16.0f, wallColor); // 尽头墙
+	gScene.AddBox(gWall, -7.0f, 0.0f, -16.0f, -6.5f, 4.0f, -14.0f, wallColor);  // 东墙（北段）
+	gScene.AddBox(gWall, -7.0f, 0.0f, -12.4f, -6.5f, 4.0f, 0.0f, wallColor);    // 东墙（南段）
 
 	// ---- 洗手间 ----
-	appendBoxMesh(verts, indices, -6.0f, 0.0f, -14.6f, -4.0f, 0.9f, -13.9f, wallColor, boxes);     // 洗手台
-	appendBoxMesh(verts, indices, -6.1f, 1.2f, -15.0f, -3.9f, 2.7f, -14.9f, pillarColor, boxes);   // 镜子
+	gScene.AddBox(gWall, -7.0f, 0.0f, -15.5f, -0.5f, 4.0f, -15.0f, wallColor); // 北墙
+	gScene.AddBox(gWall, -1.0f, 0.0f, -15.5f, -0.5f, 4.0f, -10.5f, wallColor); // 东墙
+	gScene.AddBox(gWall, -7.0f, 0.0f, -11.0f, -0.5f, 4.0f, -10.5f, wallColor); // 南墙
 
-	CMesh cMesh;
-	cMesh.Upload(verts, indices);
+	// ---- 厨房家具（木） ----
+	gScene.AddBox(gWood, -3.06f, 0.78f, 5.44f, -2.90f, 1.14f, 5.60f, candleColor); // 蜡烛
+	gScene.AddBox(gWood, -5.6f, 0.0f, 4.4f, -4.9f, 0.9f, 5.1f, woodColor);     // 椅子
+	gScene.AddBox(gWood, -1.1f, 0.0f, 4.4f, -0.4f, 0.9f, 5.1f, woodColor);
+	gScene.AddBox(gWood, -5.6f, 0.0f, 5.9f, -4.9f, 0.9f, 6.6f, woodColor);
+	gScene.AddBox(gWood, -1.1f, 0.0f, 5.9f, -0.4f, 0.9f, 6.6f, woodColor);
 
-	std::cout << "[main] collision boxes: " << boxes.size() << "\n";
+	// ---- 石砌 / 镜面 ----
+	gScene.AddBox(gStone, 2.2f, 0.0f, 0.6f, 3.9f, 2.4f, 2.0f, pillarColor);        // 壁炉
+	gScene.AddBox(gStone, -6.0f, 0.0f, -14.6f, -4.0f, 0.9f, -13.9f, wallColor);    // 洗手台
+	gScene.AddBox(gStone, -6.1f, 1.2f, -15.0f, -3.9f, 2.7f, -14.9f, pillarColor);  // 镜子
 
-	CShader shader("assets/shaders/horror.vert", "assets/shaders/horror.frag");
+	// 模型
+	CTexture tableAlbedo("assets/models/table-damaged/textures/Table-Damage_low_albedo.jpeg");
+	CTexture tableNormal("assets/models/table-damaged/textures/Table-Damage_low_normal.jpeg", false);
 
-	// ================= 光源列表（复用全局 lights） =================
-	lights.reserve(8);
+	// 原模型约 52 x 22 x 28 单位，缩到约 1.3 x 0.57 x 0.7 米
+	// 位置放在相机正前方（相机起始于 (1, 1.7, 9.2) 朝 -Z）
+	gScene.AddModel("assets/models/table-damaged/source/Table-Damage_low.obj",
+		glm::vec3(-2.5f, 0.0f, 6.0f),      // 位置
+		glm::vec3(0.0f),                   // 旋转（度）
+		glm::vec3(0.055f),                 // 缩放
+		{ &tableAlbedo, glm::vec3(1.0f), 1.0f, &tableNormal, 1.0f });
 
-	// 0 号灯：壁炉（固定位置，唯一投影的灯）
+	gScene.Build();
+	gScene.PrepareShadows(3);   // 3 盏聚光灯投影：壁炉 / 手电筒 / 洗手间
+	std::cout << "[main] collision boxes: " << gScene.Boxes().size() << "\n";
+
+	// ================= 灯光 =================
+	// 0 号：壁炉（固定位置，投影）
 	CLight fireplace;
-	fireplace.type            = 1;
-	fireplace.color           = glm::vec3(1.0f, 0.55f, 0.25f);
-	fireplace.intensity       = 10.0f;
-	fireplace.Position        = glm::vec3(3.0f, 1.2f, 2.4f);   // 火口外侧，别埋进壁炉盒子里
-	fireplace.direction       = glm::normalize(glm::vec3(-1.0f, -0.30f, 1.0f));
-	fireplace.cutoffDeg       = 14.0f;
-	fireplace.outerCutoffDeg  = 30.0f;
-	lights.push_back(fireplace);
+	fireplace.type           = 1;
+	fireplace.color          = glm::vec3(1.0f, 0.55f, 0.25f);
+	fireplace.intensity      = 10.0f;
+	fireplace.Position       = glm::vec3(3.0f, 1.2f, 2.4f);
+	fireplace.direction      = glm::normalize(glm::vec3(-1.0f, -0.30f, 1.0f));
+	fireplace.cutoffDeg      = 14.0f;
+	fireplace.outerCutoffDeg = 30.0f;
+	fireplace.castShadow     = true;
+	gScene.AddLight(fireplace);
 
+	// 1 号：手电筒（跟随相机，投影）
 	CLight flashlight;
 	flashlight.type           = 1;
 	flashlight.color          = glm::vec3(1.0f);
 	flashlight.intensity      = 2.5f;
 	flashlight.cutoffDeg      = 10.0f;
 	flashlight.outerCutoffDeg = 25.0f;
-	lights.push_back(flashlight);
+	flashlight.castShadow     = true;
+	flashlight.followCamera   = true;
+	gScene.AddLight(flashlight);
 
-	CLight lamp = fireplace;
-	lamp.Position = glm::vec3(-4.0f, 3.0f, -13.0f);
-	lamp.direction = glm::normalize(glm::vec3(0.0f, -0.3f, 1.0f));
-	lights.push_back(lamp);
+	// 2 号：洗手间灯（固定，投影）
+	CLight bathroom = fireplace;
+	bathroom.Position  = glm::vec3(-4.0f, 3.0f, -13.0f);
+	bathroom.direction = glm::normalize(glm::vec3(0.0f, -0.3f, 1.0f));
+	gScene.AddLight(bathroom);
 
 	// 3 号：蜡烛（点光源，不投影）
 	CLight candle;
@@ -293,31 +245,23 @@ int main()
 	candle.color     = glm::vec3(1.0f, 0.62f, 0.30f);
 	candle.intensity = 2.2f;
 	candle.Position  = glm::vec3(-2.98f, 1.15f, 5.52f);
-	lights.push_back(candle);
+	candle.castShadow = false;
+	gScene.AddLight(candle);
 
-	// 每帧往 shader 传的数组缓冲（复用，避免每帧重新分配）
-	std::vector<glm::vec3> lPos, lDir, lColor;
-	std::vector<float>     lIntensity, lCutoff, lOuterCutoff;
-	std::vector<int>       lType;
-	std::vector<glm::mat4> shadowMatrices;
-	for (const CLight& l : lights)
-	{
-		shadowPasses.push_back(std::make_unique<CShadow>(1024));
-	}
-		
+	CShader shader("assets/shaders/horror.vert", "assets/shaders/horror.frag");
+
 	while (!glfwWindowShouldClose(window))
 	{
 		float curFrame = (float)glfwGetTime();
 		deltaTime = curFrame - lastFrame;
 		lastFrame = curFrame;
 
-		processInput(window, boxes);
+		processInput(window);
 
-		const int lightCount = (int)lights.size();
-
-		// 手电筒开关
-		if (glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS)     flashlightOn = true;
-		if (glfwGetKey(window, GLFW_KEY_G) == GLFW_PRESS)     flashlightOn = false;
+		// 手电筒开关（只改 enabled，不覆盖 intensity，ImGui 调的值才有效）
+		if (glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS) flashlightOn = true;
+		if (glfwGetKey(window, GLFW_KEY_G) == GLFW_PRESS) flashlightOn = false;
+		gScene.Lights()[kFlashlightIndex].enabled = flashlightOn;
 
 		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -326,97 +270,58 @@ int main()
 		glfwGetFramebufferSize(window, &fbw, &fbh);
 		glm::mat4 projection = glm::perspective(glm::radians(60.0f),
 			(float)fbw / (float)fbh, 0.1f, 100.0f);
-		glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
 
-		// 手电筒 = 相机位置 + 相机朝向（加一点手持摇摆）
-		float sway = sin(curFrame * 1.8f) * 0.015f;
-		glm::vec3 right = glm::normalize(glm::cross(cameraFront, cameraUp));
-		glm::vec3 lightDir = glm::normalize(cameraFront + right * sway);
+		// 阴影 Pass + 灯光 uniform + 按材质绘制，全在场景内部完成
+		gScene.Render(shader, projection);
 
-		// 1 号灯：手电筒跟随相机（不投影）
-		lights[1].Position  = cameraPos;
-		lights[1].direction = lightDir;
-		lights[1].intensity = flashlightOn ? 2.5f : 0.0f;
-
-		// 第一遍：从光源视角把场景渲染进各自的深度图
-		shadowMatrices.assign(lightCount, glm::mat4(1.0f));
-
-		for (int i = 0; i < lightCount; ++i)
-		{
-			if (lights[i].type != 1) continue;   // 点光源不能用 2D 深度图，先跳过
-			shadowPasses[i]->Render(cMesh, lights[i].Position, lights[i].direction,
-				lights[i].outerCutoffDeg, 0.1f, 50.0f);
-			shadowMatrices[i] = shadowPasses[i]->GetLightSpace();
-		}
-
-		// 打包成 shader 需要的数组
-		lPos.clear(); lDir.clear(); lColor.clear();
-		lIntensity.clear(); lCutoff.clear(); lOuterCutoff.clear(); lType.clear();
-		for (const CLight& l : lights)
-		{
-			lPos.push_back(l.Position);
-			lDir.push_back(l.direction);
-			lColor.push_back(l.color);
-			lIntensity.push_back(l.intensity);
-			lCutoff.push_back(glm::cos(glm::radians(l.cutoffDeg)));
-			lOuterCutoff.push_back(glm::cos(glm::radians(l.outerCutoffDeg)));
-			lType.push_back(l.type);
-		}
-
-		shader.use();
-		shader.setMat4("projection", projection);
-		shader.setMat4("view", view);
-		shader.setVec3("viewPos", cameraPos);
-
-
-		shader.setInt("lightCount", lightCount);
-		shader.setVec3Array("lightPos[0]",          lPos.data(),           lightCount);
-		shader.setVec3Array("lightDirArr[0]",       lDir.data(),           lightCount);
-		shader.setVec3Array("lightColorArr[0]",     lColor.data(),         lightCount);
-		shader.setFloatArray("lightIntensity[0]",   lIntensity.data(),     lightCount);
-		shader.setFloatArray("lightCutoff[0]",      lCutoff.data(),        lightCount);
-		shader.setFloatArray("lightOuterCutoff[0]", lOuterCutoff.data(),   lightCount);
-		shader.setIntArray("lightType[0]",          lType.data(),          lightCount);
-
-		// 纹理单元计数器
-		int shadowUnit = 0;
-
-		for (int i = 0; i < lightCount; ++i)
-		{
-			// 跳过点光源 因为点光源不用2D阴影贴图
-			if (lights[i].type != 1)
-			{
-				continue;
-			}
-			glActiveTexture(GL_TEXTURE0 + shadowUnit);
-			glBindTexture(GL_TEXTURE_2D, shadowPasses[i]->GetDepthTexture());
-			shader.setInt("shadowMap" + std::to_string(i), shadowUnit);
-			++shadowUnit;
-		}
-		// 光源的相机矩阵
-		shader.setMat4Array("lightSpaceMatrices[0]", shadowMatrices.data(), lightCount);
-
-		cMesh.Draw();
-
-		// ImGui
+		// ================= ImGui =================
 		ImGui_ImplOpenGL3_NewFrame();
 		ImGui_ImplGlfw_NewFrame();
 		ImGui::NewFrame();
 
-		ImGui::SetNextWindowSize(ImVec2(460, 640), ImGuiCond_FirstUseEver);
+		ImGui::SetNextWindowSize(ImVec2(460, 720), ImGuiCond_FirstUseEver);
 		ImGui::SetNextWindowPos(ImVec2(12, 12), ImGuiCond_FirstUseEver);
 		ImGui::Begin("ImGui");
 		ImGui::Text("FPS %.1f", ImGui::GetIO().Framerate);
+		ImGui::Separator();
 
+		auto& lights = gScene.Lights();
 		for (int i = 0; i < (int)lights.size(); ++i)
 		{
 			ImGui::PushID(i);
-			ImGui::Text("Light %d", i);
-			ImGui::DragFloat3("position", &lights[i].Position.x, 0.05f);
-			ImGui::SliderFloat("intensity", &lights[i].intensity, 0.0f, 20.0f);
-			ImGui::ColorEdit3("color", &lights[i].color.x);
+			CLight& l = lights[i];
+			ImGui::Text("Light %d (%s)", i, l.type == 1 ? "spot" : "point");
+			ImGui::Checkbox("enabled", &l.enabled);
+			if (!l.followCamera)
+			{
+				ImGui::DragFloat3("position", &l.Position.x, 0.05f);
+				ImGui::DragFloat3("direction", &l.direction.x, 0.02f);
+			}
+			ImGui::SliderFloat("intensity", &l.intensity, 0.0f, 20.0f);
+			ImGui::SliderFloat("cutoff", &l.cutoffDeg, 1.0f, 80.0f);
+			ImGui::SliderFloat("outerCutoff", &l.outerCutoffDeg, 1.0f, 89.0f);
+			ImGui::Checkbox("castShadow", &l.castShadow);
+			ImGui::ColorEdit3("color", &l.color.x);
+			ImGui::Separator();
 			ImGui::PopID();
 		}
+
+		ImGui::Separator();
+		ImGui::Text("Materials");
+		auto& groups = gScene.Groups();
+		for (int i = 0; i < (int)groups.size(); ++i)
+		{
+			CMaterial& mat = groups[i]->material;
+			ImGui::PushID(1000 + i);
+			ImGui::Text("Group %d (%s)", i,
+				mat.HasNormalMap() ? "albedo+normal" : (mat.HasTexture() ? "albedo" : "solid"));
+			ImGui::SliderFloat("uScale /m", &mat.uScale, 0.02f, 3.0f);
+			ImGui::SliderFloat("normalStrength", &mat.normalStrength, 0.0f, 3.0f);
+			ImGui::ColorEdit3("tint", &mat.tint.x);
+			ImGui::Separator();
+			ImGui::PopID();
+		}
+
 		ImGui::End();
 
 		ImGui::Render();

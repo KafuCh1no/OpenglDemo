@@ -5,7 +5,7 @@
 
 #include <string>
 
-/** 着色器封装：读文件 -> 编译 -> 链接 -> 设置 uniform */
+// 着色器封装：读文件 -> 编译 -> 链接 -> 设置 uniform
 class CShader
 {
 public:

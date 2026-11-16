@@ -4,7 +4,8 @@ out vec4 FragColor;
 in vec3 WorldPos;
 in vec3 Normal;
 in vec3 ObjectColor;
-in vec2 TexCoords;      // 现在还没贴图，等 CTexture 做完再用
+in vec2 TexCoords;
+in vec2 vWorldUV;        // 世界空间 UV（单位：米）
 in vec4 vLightSpacePos;
 
 #define MAX_LIGHTS 8
@@ -25,24 +26,73 @@ uniform sampler2D shadowMap2;
 uniform mat4 lightSpaceMatrices[MAX_LIGHTS];
 uniform vec3 viewPos;
 
+// 材质
+uniform sampler2D albedoMap;
+uniform bool      uHasTexture;
+uniform float     uScale;      // UV 平铺密度
+uniform vec3      tint;        // 颜色倾向
+uniform sampler2D normalMap;
+uniform bool uHasNormalMap;
+uniform float uNormalStrength;
+
+// true = 世界空间 UV（墙面），false = 模型自带 UV
+uniform bool uUseWorldUV;
+
 float ShadowCalculation(vec4 fragPosLightSpace, sampler2D shadowMap);   // 前向声明：定义在文件末尾
+
+// 创建把“表面的局部坐标系”转成“世界坐标系”的矩阵
+mat3 BuildTBN(vec3 N, vec3 worldPos, vec2 uv)
+{
+    vec3 dp1 = dFdx(worldPos);
+    vec3 dp2 = dFdy(worldPos);
+    vec2 duv1 = dFdx(uv);
+    vec2 duv2 = dFdy(uv);
+
+    vec3 dp2perp = cross(dp2, N);
+    vec3 dp1perp = cross(N, dp1);
+
+    vec3 T = dp2perp * duv1.x + dp1perp * duv2.x;
+    vec3 B = dp2perp * duv1.y + dp1perp * duv2.y;
+
+    float invmax = inversesqrt(max(dot(T, T), dot(B, B)));
+    return mat3(T * invmax, B * invmax, N);
+}
 
 void main()
 {
+    // 墙面：世界 UV（uScale = 每米重复几次）；模型：自带 UV（uScale 一般设 1）
+    vec2 uv = uUseWorldUV ? (vWorldUV * uScale) : (TexCoords * uScale);
+
+    // 法线
     vec3 N = normalize(Normal);
-    vec3 V = normalize(viewPos - WorldPos);         // 片元 -> 眼睛
+    // 片元 -> 眼睛
+    vec3 V = normalize(viewPos - WorldPos);
 
-    // 阴影只压 0 号灯（手电筒），其他灯照常照亮
+    // 有法向贴图就换掉N
+    if (uHasNormalMap)
+    {
+        // 把（0， 1）向量解码成方向向量（-1， 1）
+        vec3 tn = texture(normalMap, uv).rgb * 2.0 - 1.0;
+        // 调节强度
+        tn.xy *= uNormalStrength;
+        // 切向方向转换到世界方向
+        N = normalize(BuildTBN(N, WorldPos, uv) * tn);
+    }
 
+    // 材质 albedo：顶点色 × tint，有贴图再乘贴图
+    vec3 albedo = ObjectColor * tint;
+    if (uHasTexture)
+        albedo *= texture(albedoMap, uv).rgb;
 
-    vec3 result = 0.03 * ObjectColor;               // 极弱环境光，营造黑暗
+    vec3 result = 0.03 * albedo;                    // 极弱环境光，营造黑暗
 
     for (int i = 0; i < MAX_LIGHTS; ++i)
     {
-        if (i >= lightCount) break;                 // 部分老驱动要求循环上界是常量
+        if (i >= lightCount) break;
 
         vec3  toLight = lightPos[i] - WorldPos;
         float dist    = length(toLight);
+        // 片元 -> 光源
         vec3  L       = toLight / max(dist, 1e-4);
 
         // 距离衰减（二次）
@@ -58,8 +108,11 @@ void main()
         }
 
         // Blinn-Phong
+        // 漫反射
         float diff = max(dot(N, L), 0.0);
+        // 半程向量
         vec3  H    = normalize(L + V);
+        // 镜面反射 即高光
         float spec = pow(max(dot(N, H), 0.0), 32.0);
 
         vec3 radiance = lightColorArr[i] * lightIntensity[i] * attenuation * spot;
@@ -75,14 +128,15 @@ void main()
             occl = 1.0 - shadow;
         }
 
-        result += occl * (diff * ObjectColor + 0.3 * spec) * radiance;
+        result += occl * (diff * albedo + 0.3 * spec) * radiance;
     }
 
     // 距离雾：按到眼睛的距离，远处融进黑暗
     float fog = 1.0 - exp(-0.045 * length(viewPos - WorldPos));
     result = mix(result, vec3(0.0), fog);
 
-    FragColor = vec4(result, 1.0);
+    // 线性 -> sRGB 编码（配合纹理的 GL_SRGB8_ALPHA8 解码）
+    FragColor = vec4(pow(result, vec3(1.0 / 2.2)), 1.0);
 }
 
 // 阴影计算

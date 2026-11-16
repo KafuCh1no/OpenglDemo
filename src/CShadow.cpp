@@ -51,7 +51,8 @@ void CShadow::CreateDepthFBO()
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-void CShadow::Render(const CMesh& mesh,
+// 画深度图
+void CShadow::Render(const std::vector<const CMesh*>& meshes,
 	const glm::vec3& lightPos,
 	const glm::vec3& lightDir,
 	float outerConeDeg,
@@ -83,7 +84,10 @@ void CShadow::Render(const CMesh& mesh,
 	// 只画背面
 	glEnable(GL_CULL_FACE);
 	glCullFace(GL_FRONT);
-	mesh.Draw();
+	for (const CMesh* m : meshes)
+	{
+		if (m) m->Draw();
+	}
 	// 恢复
 	glCullFace(GL_BACK);
 	glDisable(GL_CULL_FACE);
