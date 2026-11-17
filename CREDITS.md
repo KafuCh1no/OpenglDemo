@@ -13,6 +13,7 @@
 |------|------|------|--------|------|
 | Table-Damaged | Aidin Salsabili | [来源地址](https://www.fab.com/listings/99c1cefd-e3b4-4643-9bb3-7732b4116335) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | 未修改，运行时缩放 |
 | Antique Chair | Krag Studio | [来源地址](https://www.fab.com/listings/50020a0c-fc0b-4368-a414-aeb8f75f30fd) | CC BY 4.0 | 未修改 |
+| Fireplace Low-poly | MaX3Dd | [来源地址](https://sketchfab.com/3d-models/fireplace-low-poly-d1473f5f384a411f979b99214de9f2a9) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | 未修改 |
 
 
 ## 代码库

@@ -141,16 +141,20 @@ int main()
 	const glm::vec3 woodColor(0.32f, 0.20f, 0.12f);
 	const glm::vec3 candleColor(0.92f, 0.86f, 0.70f);
 
+	// 墙壁
 	CTexture wallTex("assets/textures/Plaster006_2K-JPG_Color.jpg");
 	CTexture wallNormal("assets/textures/Plaster006_2K-JPG_NormalGL.jpg", false);
 	CTexture paintedWallTex("assets/textures/PaintedPlaster014_2K-JPG_Color.jpg");
 	CTexture paintedWallNormal("assets/textures/PaintedPlaster014_2K-JPG_NormalGL.jpg", false);
 
-	// 四种材质分组（现在都没贴图，靠顶点色区分；以后放上贴图即可）
-	// uScale 现在是「每米重复几次」：0.4 = 每 2.5 米一个循环
+	// 地板
+	CTexture floorTex("assets/textures/WoodFloor007_2K-JPG_Color.jpg");
+	CTexture floorNormal("assets/textures/WoodFloor007_2K-JPG_NormalGL.jpg", false);
+
+	// 四种材质分组
 	auto& gWall        = gScene.NewGroup({ &wallTex,        glm::vec3(1.0f), 0.4f, &wallNormal,        1.0f });
 	auto& gPaintedWall = gScene.NewGroup({ &paintedWallTex, glm::vec3(1.0f), 0.25f, &paintedWallNormal, 1.0f });
-	auto& gFloor = gScene.NewGroup({ nullptr, glm::vec3(1.0f), 2.0f });
+	auto& gFloor = gScene.NewGroup({ &floorTex, glm::vec3(1.0f), 0.4f, &floorNormal, 1.0f });
 	auto& gWood  = gScene.NewGroup({ nullptr, glm::vec3(1.0f), 1.0f });
 	auto& gStone = gScene.NewGroup({ nullptr, glm::vec3(1.0f), 1.0f });
 
@@ -181,15 +185,8 @@ int main()
 	gScene.AddBox(gWall, -1.0f, 0.0f, -15.5f, -0.5f, 4.0f, -10.5f, wallColor); // 东墙
 	gScene.AddBox(gWall, -7.0f, 0.0f, -11.0f, -0.5f, 4.0f, -10.5f, wallColor); // 南墙
 
-	// ---- 厨房家具（木） ----
-	gScene.AddBox(gWood, -3.06f, 0.78f, 5.44f, -2.90f, 1.14f, 5.60f, candleColor); // 蜡烛
-	gScene.AddBox(gWood, -5.6f, 0.0f, 4.4f, -4.9f, 0.9f, 5.1f, woodColor);     // 椅子
-	gScene.AddBox(gWood, -1.1f, 0.0f, 4.4f, -0.4f, 0.9f, 5.1f, woodColor);
-	gScene.AddBox(gWood, -5.6f, 0.0f, 5.9f, -4.9f, 0.9f, 6.6f, woodColor);
-	gScene.AddBox(gWood, -1.1f, 0.0f, 5.9f, -0.4f, 0.9f, 6.6f, woodColor);
-
 	// ---- 石砌 / 镜面 ----
-	gScene.AddBox(gStone, 2.2f, 0.0f, 0.6f, 3.9f, 2.4f, 2.0f, pillarColor);        // 壁炉
+	// 壁炉改用模型（见下方 AddModel），原来的 5 块石盒子已移除
 	gScene.AddBox(gStone, -6.0f, 0.0f, -14.6f, -4.0f, 0.9f, -13.9f, wallColor);    // 洗手台
 	gScene.AddBox(gStone, -6.1f, 1.2f, -15.0f, -3.9f, 2.7f, -14.9f, pillarColor);  // 镜子
 
@@ -202,35 +199,135 @@ int main()
 	CTexture chairAlbedo("assets/models/chair/Textures/Blender_2K/T_Chair_BaseColor.jpg");
 	CTexture chairNormal("assets/models/chair/Textures/Blender_2K/T_Chair_Normal.png", false);
 
+	// 哥特柜子 / 木桶 / 铜灯笼（Poly Haven, CC0）
+	CTexture cabinetAlbedo("assets/models/gothic-cabinet/textures/GothicCabinet_01_diff_2k.jpg");
+	CTexture cabinetNormal("assets/models/gothic-cabinet/textures/GothicCabinet_01_nor_gl_2k.jpg", false);
+
+	CTexture barrelAlbedo("assets/models/barrel/textures/Barrel_01_diff.jpg");
+	CTexture barrelNormal("assets/models/barrel/textures/Barrel_01_nor.jpg", false);
+
+	CTexture lanternAlbedo("assets/models/lantern/textures/Lantern_01_brass_diff_2k.jpg");
+	CTexture lanternNormal("assets/models/lantern/textures/Lantern_01_brass_nor_gl_2k.jpg", false);
+
+	// 吊灯（Poly Haven, CC0）
+	CTexture chandelierAlbedo("assets/models/chandelier/textures/Chandelier_02_diff_2k.jpg");
+	CTexture chandelierNormal("assets/models/chandelier/textures/Chandelier_02_nor_gl_2k.jpg", false);
+
+	// 壁炉（Sketchfab, CC BY 4.0, by MaX3Dd）
+	CTexture fireplaceAlbedo("assets/models/fireplace/textures/fireplace_baseColor.jpg");
+	CTexture fireplaceNormal("assets/models/fireplace/textures/fireplace_normal.jpg", false);
+
+
+
+	// ---- 可编辑模型表：ImGui 里能拖位置，Reset 回到这里的初值 ----
+	struct ModelHandle
+	{
+		std::string    name;
+		CScene::Group* group = nullptr;
+		glm::vec3      initPos{ 0.0f };
+		glm::vec3      initRot{ 0.0f };
+		glm::vec3      initScale{ 1.0f };
+	};
+	std::vector<ModelHandle> models;
+	auto reg = [&models](std::string name, CScene::Group& g)
+	{
+		models.push_back({ std::move(name), &g, g.modelPos, g.modelRotDeg, g.modelScale });
+	};
+
 	// 桌子原模型约 52 x 22 x 28 单位，缩到约 1.3 x 0.57 x 0.7 米
 	// 位置放在相机正前方（相机起始于 (1, 1.7, 9.2) 朝 -Z）
 	gScene.AddModel("assets/models/table-damaged/source/Table-Damage_low.obj",
-		glm::vec3(-2.5f, 0.0f, 6.0f),      // 位置
+		glm::vec3(-1.7f, -0.25f, 6.5f),      // 位置
 		glm::vec3(0.0f),                   // 旋转（度）
-		glm::vec3(0.055f),                 // 缩放
+		glm::vec3(0.065f),                 // 缩放
 		{ &tableAlbedo, glm::vec3(1.0f), 1.0f, &tableNormal, 1.0f });
 
 	// 椅子
 	gScene.AddModel("assets/models/chair/SM_Chair.obj",
-		glm::vec3(-5.0f, 0.0f, 6.4f),        // ← 挪到桌子左边
-		glm::vec3(0.0f, 30.0f, 0.0f),        // ← 转 30°，朝向桌子
+		glm::vec3(-1.3f, 0.05f, 8.0f),        // ← 挪到桌子左边
+		glm::vec3(3.0f, 90.0f, 90.0f),        // ← 转 30°，朝向桌子
 		glm::vec3(1.25f),                // 缩放
 		{ &chairAlbedo, glm::vec3(1.0f), 1.0f, &chairNormal, 1.0f });
 
+	gScene.AddModel("assets/models/chair/SM_Chair.obj",
+		glm::vec3(-2.7f, 0.0f, 8.0f),
+		glm::vec3(3.0f, 150.0f, 0.0f),
+		glm::vec3(1.25f),
+		{ &chairAlbedo, glm::vec3(1.0f), 1.0f, &chairNormal, 1.0f });
+
+	gScene.AddModel("assets/models/chair/SM_Chair.obj",
+		glm::vec3(-3.0f, 0.0f, 5.0f),
+		glm::vec3(-85.0f, 0.0f, 0.0f),
+		glm::vec3(1.25f),
+		{ &chairAlbedo, glm::vec3(1.0f), 1.0f, &chairNormal, 1.0f });
+
+	gScene.AddModel("assets/models/chair/SM_Chair.obj",
+		glm::vec3(-1.3f, 0.0f, 4.5f),
+		glm::vec3(0.0f, 60.0f, 0.0f),
+		glm::vec3(1.25f),
+		{ &chairAlbedo, glm::vec3(1.0f), 1.0f, &chairNormal, 1.0f });
+
+	// 哥特柜子：原始 1.72 x 2.81 x 1.02，底部在 y=-0.45，靠西墙摆放
+	{
+		auto& g = gScene.AddModel("assets/models/gothic-cabinet/GothicCabinet_01.obj",
+			glm::vec3(-9.55f, 0.38f, 3.5f),      // 0.38 = 0.45 * 0.85，让底部贴地
+			glm::vec3(0.0f, 90.0f, 0.0f),        // 转 90°，正面朝房间内
+			glm::vec3(0.85f),
+			{ &cabinetAlbedo, glm::vec3(1.0f), 1.0f, &cabinetNormal, 1.0f });
+		reg("Cabinet", g);
+	}
+
+	// 木桶：原始 0.56 x 0.88 x 0.56，放在客厅西南角
+	{
+		auto& g = gScene.AddModel("assets/models/barrel/Barrel_01.obj",
+			glm::vec3(-9.0f, 0.01f, 1.2f),
+			glm::vec3(0.0f),
+			glm::vec3(1.0f),
+			{ &barrelAlbedo, glm::vec3(1.0f), 1.0f, &barrelNormal, 1.0f });
+		reg("Barrel", g);
+	}
+
+	// 铜灯笼：原始只有 0.12 x 0.29 x 0.10，放大 2.5 倍放在壁炉前的空地上
+	{
+		auto& g = gScene.AddModel("assets/models/lantern/Lantern_01.obj",
+			glm::vec3(1.2f, 0.0f, 2.9f),
+			glm::vec3(0.0f, 20.0f, 0.0f),
+			glm::vec3(2.5f),
+			{ &lanternAlbedo, glm::vec3(1.0f), 1.0f, &lanternNormal, 1.0f });
+		reg("Lantern", g);
+	}
+
+	// 吊灯：原始 0.68 x 0.85 x 0.62，最高点在 y=0.908
+	{
+		auto& g = gScene.AddModel("assets/models/chandelier/Chandelier_02.obj",
+			glm::vec3(-2.5f, 2.2f, 3.3f),
+			glm::vec3(0.0f),
+			glm::vec3(3.0f),
+			{ &chandelierAlbedo, glm::vec3(1.0f), 1.0f, &chandelierNormal, 1.0f });
+		reg("Chandelier", g);
+	}
+
+	// 壁炉：0.83 x 1.69 x 2.18（深 x 高 x 宽），背面贴东墙 x=4.0
+	{
+		auto& g = gScene.AddModel("assets/models/fireplace/fireplace.obj",
+			glm::vec3(2.5f, 0.0f, 0.57f),
+			glm::vec3(0.0f, 90.0f, 0.0f),
+			glm::vec3(1.5f),
+			{ &fireplaceAlbedo, glm::vec3(1.0f), 1.0f, &fireplaceNormal, 1.0f });
+		reg("Fireplace", g);
+	}
+
 	gScene.Build();
-	gScene.PrepareShadows(3);   // 3 盏聚光灯投影：壁炉 / 手电筒 / 洗手间
+	gScene.PrepareShadows(4);   // 4 盏灯各一套 Pass：壁炉(点) / 手电筒(聚) / 洗手间(聚) / 蜡烛(点)
 	std::cout << "[main] collision boxes: " << gScene.Boxes().size() << "\n";
 
 	// ================= 灯光 =================
-	// 0 号：壁炉（固定位置，投影）
+	// 0 号：壁炉
 	CLight fireplace;
-	fireplace.type           = 1;
+	fireplace.type           = 0;      // 点光源：用 cubemap 阴影
 	fireplace.color          = glm::vec3(1.0f, 0.55f, 0.25f);
-	fireplace.intensity      = 10.0f;
-	fireplace.Position       = glm::vec3(3.0f, 1.2f, 2.4f);
-	fireplace.direction      = glm::normalize(glm::vec3(-1.0f, -0.30f, 1.0f));
-	fireplace.cutoffDeg      = 14.0f;
-	fireplace.outerCutoffDeg = 30.0f;
+	fireplace.intensity      = 0.3f;
+	fireplace.Position       = glm::vec3(2.50f, 0.70f, 0.90f);
 	fireplace.castShadow     = true;
 	gScene.AddLight(fireplace);
 
@@ -247,15 +344,19 @@ int main()
 
 	// 2 号：洗手间灯（固定，投影）
 	CLight bathroom = fireplace;
-	bathroom.Position  = glm::vec3(-4.0f, 3.0f, -13.0f);
-	bathroom.direction = glm::normalize(glm::vec3(0.0f, -0.3f, 1.0f));
+	bathroom.type            = 1;                      // 显式改回聚光灯（壁炉已改成点光）
+	bathroom.intensity       = 10.0f;
+	bathroom.Position        = glm::vec3(-4.0f, 3.0f, -13.0f);
+	bathroom.direction       = glm::normalize(glm::vec3(0.0f, -0.3f, 1.0f));
+	bathroom.cutoffDeg       = 14.0f;
+	bathroom.outerCutoffDeg  = 30.0f;
 	gScene.AddLight(bathroom);
 
 	// 3 号：蜡烛（点光源，不投影）
 	CLight candle;
 	candle.type      = 0;
 	candle.color     = glm::vec3(1.0f, 0.62f, 0.30f);
-	candle.intensity = 2.2f;
+	candle.intensity = 0.0f;
 	candle.Position  = glm::vec3(-2.98f, 1.15f, 5.52f);
 	candle.castShadow = false;
 	gScene.AddLight(candle);
@@ -331,6 +432,51 @@ int main()
 			ImGui::SliderFloat("normalStrength", &mat.normalStrength, 0.0f, 3.0f);
 			ImGui::ColorEdit3("tint", &mat.tint.x);
 			ImGui::Separator();
+			ImGui::PopID();
+		}
+
+		// ---------------- 模型位置 ----------------
+		ImGui::Separator();
+		ImGui::Text("Models");
+
+		// 默认关闭：拖动后的值会一直保留，不会被代码里的初值覆盖
+		// 勾上则每帧写回初值（用于对比 / 复位调试）
+		static bool autoReset = false;
+		ImGui::Checkbox("auto reset every frame", &autoReset);
+		ImGui::SameLine();
+		const bool clickedReset = ImGui::Button("Reset All");
+
+		if (clickedReset || autoReset)
+		{
+			for (auto& m : models)
+			{
+				m.group->modelPos    = m.initPos;
+				m.group->modelRotDeg = m.initRot;
+				m.group->modelScale  = m.initScale;
+				gScene.RefreshBox(*m.group);
+			}
+		}
+
+		for (int i = 0; i < (int)models.size(); ++i)
+		{
+			ModelHandle& m = models[i];
+			ImGui::PushID(2000 + i);
+			ImGui::Text("%s", m.name.c_str());
+
+			bool changed = false;
+			changed |= ImGui::DragFloat3("pos", &m.group->modelPos.x, 0.02f);
+			changed |= ImGui::DragFloat3("rot", &m.group->modelRotDeg.x, 0.5f);
+
+			float s = m.group->modelScale.x;
+			if (ImGui::DragFloat("scale", &s, 0.005f, 0.01f, 5.0f))
+			{
+				m.group->modelScale = glm::vec3(s);   // 保持等比，避免法线被拉歪
+				changed = true;
+			}
+
+			// 位置变了就重算碰撞盒，否则玩家会撞到旧位置的空气墙
+			if (changed) gScene.RefreshBox(*m.group);
+
 			ImGui::PopID();
 		}
 

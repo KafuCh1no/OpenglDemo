@@ -12,6 +12,7 @@
 
 class CShader;
 class CShadow;
+class CShadowCube;
 
 // 场景光源：点光 / 聚光，可选投影、可选跟随相机
 struct CLight
@@ -54,6 +55,11 @@ public:
 		std::vector<float>        verts;
 		std::vector<unsigned int> indices;
 		std::unique_ptr<CMesh>    mesh;
+
+		// 碰撞盒同步用：Build() 会清掉 verts，所以模型空间的包围盒必须提前存下来
+		glm::vec3                 localMin{ 1e9f };
+		glm::vec3                 localMax{ -1e9f };
+		int                       boxIndex = -1;        // 在 m_boxes 里的下标，-1 = 没有碰撞盒
 	};
 
 	// 相机
@@ -91,6 +97,10 @@ public:
 	// 把所有分组的顶点上传到 GPU，并释放 CPU 侧数据 
 	void Build();
 
+	// 模型位置在运行时被改过之后，按新的 transform 重算它的碰撞盒
+	// （ImGui 调位置时用；Box 的尺寸取 AddModel 时缓存的模型空间包围盒）
+	void RefreshBox(Group& g);
+
 	// 灯光
 	CLight& AddLight(const CLight& light);
 	std::vector<CLight>& Lights() { return m_lights; }
@@ -111,8 +121,9 @@ public:
 	void PrepareShadows(int count = 3);
 
 private:
-	std::vector<std::unique_ptr<Group>>   m_groups;
-	std::vector<CLight>                   m_lights;
-	std::vector<std::unique_ptr<CShadow>> m_shadowPasses;
-	std::vector<Box>                      m_boxes;
+	std::vector<std::unique_ptr<Group>>       m_groups;
+	std::vector<CLight>                       m_lights;
+	std::vector<std::unique_ptr<CShadow>>     m_shadowPasses;   // 聚光灯：2D 深度图
+	std::vector<std::unique_ptr<CShadowCube>> m_cubePasses;     // 点光源：cubemap
+	std::vector<Box>                          m_boxes;
 };

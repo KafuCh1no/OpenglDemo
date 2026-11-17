@@ -24,6 +24,13 @@ uniform sampler2D shadowMap0;
 uniform sampler2D shadowMap1;
 uniform sampler2D shadowMap2;
 uniform mat4 lightSpaceMatrices[MAX_LIGHTS];
+
+// 点光源阴影：cubemap 里存的是「到光源的线性距离 / farPlane」
+uniform samplerCube shadowCube0;
+uniform samplerCube shadowCube1;
+uniform samplerCube shadowCube2;
+uniform float pointFarPlane[MAX_LIGHTS];
+
 uniform vec3 viewPos;
 
 // 材质
@@ -39,6 +46,7 @@ uniform float uNormalStrength;
 uniform bool uUseWorldUV;
 
 float ShadowCalculation(vec4 fragPosLightSpace, sampler2D shadowMap);   // 前向声明：定义在文件末尾
+float PointShadowCalculation(vec3 fragPos, vec3 lightPos, samplerCube cube, float farPlane);
 
 // 创建把“表面的局部坐标系”转成“世界坐标系”的矩阵
 mat3 BuildTBN(vec3 N, vec3 worldPos, vec2 uv)
@@ -120,11 +128,21 @@ void main()
         float occl = 1.0;
         if (lightType[i] == 1)
         {
+            // 聚光灯：2D 深度图
             vec4 lp = lightSpaceMatrices[i] * vec4(WorldPos, 1.0);
             float shadow = 0.0;
             if      (i == 0) shadow = ShadowCalculation(lp, shadowMap0);
             else if (i == 1) shadow = ShadowCalculation(lp, shadowMap1);
             else if (i == 2) shadow = ShadowCalculation(lp, shadowMap2);
+            occl = 1.0 - shadow;
+        }
+        else if (lightType[i] == 0)
+        {
+            // 点光源：cubemap，按到光源的距离比较
+            float shadow = 0.0;
+            if      (i == 0) shadow = PointShadowCalculation(WorldPos, lightPos[0], shadowCube0, pointFarPlane[0]);
+            else if (i == 1) shadow = PointShadowCalculation(WorldPos, lightPos[1], shadowCube1, pointFarPlane[1]);
+            else if (i == 2) shadow = PointShadowCalculation(WorldPos, lightPos[2], shadowCube2, pointFarPlane[2]);
             occl = 1.0 - shadow;
         }
 
@@ -157,4 +175,20 @@ float ShadowCalculation(vec4 fragPosLightSpace, sampler2D shadowMap)
     // bias用来区分"真的被挡住"和"深度比较的误差",目前暂时用不到
     float bias = 0.0002;   // 5 cm
     return currentDepth > closestDepth ? 1.0 : 0.0;
+}
+
+// 点光源阴影：比较到光源的线性距离
+// cubemap 里存的是 length(fragPos - lightPos) / farPlane（由 gl_FragDepth 写入）
+float PointShadowCalculation(vec3 fragPos, vec3 lightPos, samplerCube cube, float farPlane)
+{
+    vec3  dir     = fragPos - lightPos;
+    float current = length(dir) / farPlane;
+
+    // dir 既是采样方向也是距离向量，GPU 按主轴自动选面
+    float closest = texture(cube, dir).r;
+
+    // 6 个面朝向不同，acne 程度不一样，bias 取比聚光大的折中值
+    // 注意这里是「归一化到 farPlane 的距离」，0.015 * 30m = 0.45m
+    float bias = 0.015;
+    return current - bias > closest ? 1.0 : 0.0;
 }

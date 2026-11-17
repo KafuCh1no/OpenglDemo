@@ -9,6 +9,7 @@
 
 #include "CShader.h"
 #include "CShadow.h"
+#include "CShadowCube.h"
 #include "CTexture.h"
 #include "CModel.h"
 
@@ -131,21 +132,37 @@ CScene::Group& CScene::AddModel(const std::string& path,
 		return g;
 	}
 
-	const glm::mat4 transform = ComposeTransform(position, rotationDeg, scale);
-
-	// 按变换后的顶点算 AABB，直接用作碰撞盒
-	glm::vec3 mn(1e9f);
-	glm::vec3 mx(-1e9f);
+	// 先算模型空间包围盒：Build() 之后 verts 会被释放，运行时改位置就没法重算了
+	glm::vec3 lmn(1e9f);
+	glm::vec3 lmx(-1e9f);
 	for (size_t i = 0; i + 10 < g.verts.size(); i += 11)
 	{
 		const glm::vec3 p(g.verts[i + 0], g.verts[i + 1], g.verts[i + 2]);
-		const glm::vec3 wp = glm::vec3(transform * glm::vec4(p, 1.0f));
-		mn = glm::min(mn, wp);
-		mx = glm::max(mx, wp);
+		lmn = glm::min(lmn, p);
+		lmx = glm::max(lmx, p);
 	}
+	g.localMin = lmn;
+	g.localMax = lmx;
 
-	if (mn.x <= mx.x)
+	// 用包围盒的 8 个角点算世界 AABB（ImGui 改位置后 RefreshBox 走同样逻辑）
+	if (lmn.x <= lmx.x)
 	{
+		const glm::mat4 transform = ComposeTransform(position, rotationDeg, scale);
+
+		glm::vec3 mn(1e9f);
+		glm::vec3 mx(-1e9f);
+		for (int k = 0; k < 8; ++k)
+		{
+			const glm::vec3 p(
+				(k & 1) ? lmx.x : lmn.x,
+				(k & 2) ? lmx.y : lmn.y,
+				(k & 4) ? lmx.z : lmn.z);
+			const glm::vec3 wp = glm::vec3(transform * glm::vec4(p, 1.0f));
+			mn = glm::min(mn, wp);
+			mx = glm::max(mx, wp);
+		}
+
+		g.boxIndex = (int)m_boxes.size();
 		m_boxes.push_back({ mn, mx });
 		std::cout << "[AddModel] AABB min=(" << mn.x << "," << mn.y << "," << mn.z
 			<< ") max=(" << mx.x << "," << mx.y << "," << mx.z
@@ -153,6 +170,29 @@ CScene::Group& CScene::AddModel(const std::string& path,
 	}
 
 	return g;
+}
+
+void CScene::RefreshBox(Group& g)
+{
+	if (g.boxIndex < 0 || g.boxIndex >= (int)m_boxes.size()) return;
+	if (g.localMin.x > g.localMax.x) return;
+
+	const glm::mat4 tf = ComposeTransform(g.modelPos, g.modelRotDeg, g.modelScale);
+
+	glm::vec3 mn(1e9f);
+	glm::vec3 mx(-1e9f);
+	for (int k = 0; k < 8; ++k)
+	{
+		const glm::vec3 p(
+			(k & 1) ? g.localMax.x : g.localMin.x,
+			(k & 2) ? g.localMax.y : g.localMin.y,
+			(k & 4) ? g.localMax.z : g.localMin.z);
+		const glm::vec3 wp = glm::vec3(tf * glm::vec4(p, 1.0f));
+		mn = glm::min(mn, wp);
+		mx = glm::max(mx, wp);
+	}
+
+	m_boxes[g.boxIndex] = { mn, mx };
 }
 
 void CScene::Build()
@@ -195,10 +235,16 @@ void CScene::MoveCamera(const glm::vec3& delta, float radius, float height)
 void CScene::PrepareShadows(int count)
 {
 	m_shadowPasses.clear();
+	m_cubePasses.clear();
+
 	for (int i = 0; i < count; ++i)
 	{
+		// 聚光：2D 深度图，每个都建（尺寸小）
 		m_shadowPasses.push_back(std::make_unique<CShadow>(1024));
 	}
+	// 点光 cube 在 Render 里按需创建：6 面 × 1024² 很占显存，
+	// 不是每盏点光都投影，没必要一次全建出来
+	m_cubePasses.resize(count);
 }
 
 void CScene::Render(CShader& shader, const glm::mat4& projection)
@@ -217,30 +263,49 @@ void CScene::Render(CShader& shader, const glm::mat4& projection)
 
 	const int lightCount = (int)m_lights.size();
 
-	// 所有分组几何，供阴影 Pass 使用
-	std::vector<const CMesh*> meshes;
-	meshes.reserve(m_groups.size());
+	// 所有分组几何 + 各自的世界变换，供阴影 Pass 使用
+	// model 必须一起传，否则阴影会画在模型空间原点
+	std::vector<CShadow::DrawItem> shadowItems;
+	shadowItems.reserve(m_groups.size());
 	for (auto& g : m_groups)
 	{
 		if (g->mesh)
 		{
-			meshes.push_back(g->mesh.get());
+			shadowItems.push_back({
+				g->mesh.get(),
+				ComposeTransform(g->modelPos, g->modelRotDeg, g->modelScale)
+			});
 		}
 	}
 
 	 //阴影 Pass
-	 //准备矩阵数组
-	std::vector<glm::mat4> shadowMats(lightCount, glm::mat4(1.0f));
+	 //聚光灯用 2D 深度图，点光源用 cubemap
+	constexpr float SHADOW_FAR = 50.0f;
+	constexpr float POINT_FAR  = 30.0f;
 
-	for (int i = 0; i < lightCount && i < (int)m_shadowPasses.size(); ++i)
+	std::vector<glm::mat4> shadowMats(lightCount, glm::mat4(1.0f));
+	std::vector<float>     pointFar(lightCount, POINT_FAR);
+
+	for (int i = 0; i < lightCount; ++i)
 	{
 		const CLight& l = m_lights[i];
-		if (l.type != 1 || !l.castShadow || !l.enabled) continue;
+		if (!l.castShadow || !l.enabled) continue;
 
-		// 深度Pass
-		m_shadowPasses[i]->Render(meshes, l.Position, l.direction, l.outerCutoffDeg, 0.1f, 50.0f);
-		// 记录矩阵
-		shadowMats[i] = m_shadowPasses[i]->GetLightSpace();
+		if (l.type == 1 && i < (int)m_shadowPasses.size())
+		{
+			m_shadowPasses[i]->Render(shadowItems, l.Position, l.direction,
+				l.outerCutoffDeg, 0.1f, SHADOW_FAR);
+			shadowMats[i] = m_shadowPasses[i]->GetLightSpace();
+		}
+		else if (l.type == 0 && i < (int)m_cubePasses.size())
+		{
+			// 首次用到这盏点光时才分配 cubemap（6 面 × 1024² 不算小）
+			if (!m_cubePasses[i])
+				m_cubePasses[i] = std::make_unique<CShadowCube>(1024);
+
+			m_cubePasses[i]->Render(shadowItems, l.Position, 0.1f, POINT_FAR);
+			pointFar[i] = m_cubePasses[i]->GetFarPlane();
+		}
 	}
 
 	// 把结构体数组拆绳多个属性数组
@@ -282,16 +347,27 @@ void CScene::Render(CShader& shader, const glm::mat4& projection)
 	shader.setFloatArray("lightOuterCutoff[0]", lOuter.data(),   lightCount);
 	shader.setIntArray("lightType[0]",          lType.data(),    lightCount);
 	shader.setMat4Array("lightSpaceMatrices[0]", shadowMats.data(), lightCount);
+	shader.setFloatArray("pointFarPlane[0]",    pointFar.data(), lightCount);
 
-	// 绑定阴影贴图
-	for (int i = 0; i < lightCount && i < (int)m_shadowPasses.size(); ++i)
+	// 绑定阴影贴图：聚光走 2D，点光走 cubemap
+	for (int i = 0; i < lightCount; ++i)
 	{
 		const CLight& l = m_lights[i];
-		if (l.type != 1 || !l.castShadow || !l.enabled) continue;
+		if (!l.castShadow || !l.enabled) continue;
 
-		glActiveTexture(GL_TEXTURE0 + i);
-		glBindTexture(GL_TEXTURE_2D, m_shadowPasses[i]->GetDepthTexture());
-		shader.setInt("shadowMap" + std::to_string(i), i);
+		if (l.type == 1 && i < (int)m_shadowPasses.size())
+		{
+			glActiveTexture(GL_TEXTURE0 + i);
+			glBindTexture(GL_TEXTURE_2D, m_shadowPasses[i]->GetDepthTexture());
+			shader.setInt("shadowMap" + std::to_string(i), i);
+		}
+		else if (l.type == 0 && i < (int)m_cubePasses.size() && m_cubePasses[i])
+		{
+			const int unit = 5 + i;   // 0~2 聚光、3 albedo、4 normal、5~7 点光 cubemap
+			glActiveTexture(GL_TEXTURE0 + unit);
+			glBindTexture(GL_TEXTURE_CUBE_MAP, m_cubePasses[i]->GetDepthCubemap());
+			shader.setInt("shadowCube" + std::to_string(i), unit);
+		}
 	}
 
 	// 按材质分组绘制

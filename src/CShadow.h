@@ -22,8 +22,17 @@ public:
 	CShadow(const CShadow&) = delete;
 	CShadow& operator=(const CShadow&) = delete;
 
-	// 深度 Pass：把一组 mesh 从光源视角渲染进深度图
-	void Render(const std::vector<const CMesh*>& meshes,
+	// 一个待绘制的物体：mesh + 它的世界变换
+	// CMesh 只持有 VAO/VBO/EBO，不带变换，所以 model 必须由调用方传进来，
+	// 否则阴影会停留在模型空间原点，和实体位置对不上
+	struct DrawItem
+	{
+		const CMesh* mesh = nullptr;
+		glm::mat4    model{ 1.0f };
+	};
+
+	// 深度 Pass：把一组物体从光源视角渲染进深度图
+	void Render(const std::vector<DrawItem>& items,
 		const glm::vec3& lightPos,
 		const glm::vec3& lightDir,
 		float outerConeDeg,
@@ -42,6 +51,7 @@ private:
 	unsigned int m_fbo = 0;
 	unsigned int m_depthTex = 0;
 	glm::mat4 m_lightSpace = glm::mat4(1.0f);
+	bool isCube = false;
 
 	CShader m_depthShader;
 };
