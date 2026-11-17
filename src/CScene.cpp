@@ -15,55 +15,53 @@
 CScene::CScene() = default;
 CScene::~CScene() = default;
 
-namespace
+// 把 AABB 转成顶点/索引追加进数组：每顶点 11 float（pos3 | normal3 | color3 | uv2）
+void AppendBoxMesh(std::vector<float>& verts, std::vector<unsigned int>& indices,
+	float x0, float y0, float z0,
+	float x1, float y1, float z1,
+	const glm::vec3& color)
 {
-	// 把 AABB 转成顶点/索引追加进数组：每顶点 11 float（pos3 | normal3 | color3 | uv2）
-	void AppendBoxMesh(std::vector<float>& verts, std::vector<unsigned int>& indices,
-		float x0, float y0, float z0,
-		float x1, float y1, float z1,
-		const glm::vec3& color)
+	unsigned int base = (unsigned int)(verts.size() / 11);
+
+	struct Face { glm::vec3 n; glm::vec3 v[4]; };
+	Face faces[6] = {
+		{ { 0, 0, 1}, {{x0,y0,z1},{x1,y0,z1},{x1,y1,z1},{x0,y1,z1}} },  // +Z
+		{ { 0, 0,-1}, {{x1,y0,z0},{x0,y0,z0},{x0,y1,z0},{x1,y1,z0}} },  // -Z
+		{ { 1, 0, 0}, {{x1,y0,z1},{x1,y0,z0},{x1,y1,z0},{x1,y1,z1}} },  // +X
+		{{-1, 0, 0}, {{x0,y0,z0},{x0,y0,z1},{x0,y1,z1},{x0,y1,z0}} },   // -X
+		{ { 0, 1, 0}, {{x0,y1,z1},{x1,y1,z1},{x1,y1,z0},{x0,y1,z0}} },  // +Y
+		{ { 0,-1, 0}, {{x0,y0,z0},{x1,y0,z0},{x1,y0,z1},{x0,y0,z1}} },  // -Y
+	};
+
+	// 每面 4 个角的 UV：左下、右下、右上、左上（平铺交给 shader 的 uScale）
+	static const glm::vec2 kQuadUV[4] = { {0.0f,0.0f}, {1.0f,0.0f}, {1.0f,1.0f}, {0.0f,1.0f} };
+
+	for (auto& f : faces)
 	{
-		unsigned int base = (unsigned int)(verts.size() / 11);
-
-		struct Face { glm::vec3 n; glm::vec3 v[4]; };
-		Face faces[6] = {
-			{ { 0, 0, 1}, {{x0,y0,z1},{x1,y0,z1},{x1,y1,z1},{x0,y1,z1}} },  // +Z
-			{ { 0, 0,-1}, {{x1,y0,z0},{x0,y0,z0},{x0,y1,z0},{x1,y1,z0}} },  // -Z
-			{ { 1, 0, 0}, {{x1,y0,z1},{x1,y0,z0},{x1,y1,z0},{x1,y1,z1}} },  // +X
-			{{-1, 0, 0}, {{x0,y0,z0},{x0,y0,z1},{x0,y1,z1},{x0,y1,z0}} },   // -X
-			{ { 0, 1, 0}, {{x0,y1,z1},{x1,y1,z1},{x1,y1,z0},{x0,y1,z0}} },  // +Y
-			{ { 0,-1, 0}, {{x0,y0,z0},{x1,y0,z0},{x1,y0,z1},{x0,y0,z1}} },  // -Y
-		};
-
-		// 每面 4 个角的 UV：左下、右下、右上、左上（平铺交给 shader 的 uScale）
-		static const glm::vec2 kQuadUV[4] = { {0.0f,0.0f}, {1.0f,0.0f}, {1.0f,1.0f}, {0.0f,1.0f} };
-
-		for (auto& f : faces)
+		for (int i = 0; i < 4; ++i)
 		{
-			for (int i = 0; i < 4; ++i)
-			{
-				const glm::vec3& c = f.v[i];
-				verts.push_back(c.x); verts.push_back(c.y); verts.push_back(c.z);
-				verts.push_back(f.n.x); verts.push_back(f.n.y); verts.push_back(f.n.z);
-				verts.push_back(color.r); verts.push_back(color.g); verts.push_back(color.b);
-				verts.push_back(kQuadUV[i].x); verts.push_back(kQuadUV[i].y);
-			}
-			indices.insert(indices.end(), { base, base + 1, base + 2, base, base + 2, base + 3 });
-			base += 4;
+			const glm::vec3& c = f.v[i];
+			verts.push_back(c.x); verts.push_back(c.y); verts.push_back(c.z);
+			verts.push_back(f.n.x); verts.push_back(f.n.y); verts.push_back(f.n.z);
+			verts.push_back(color.r); verts.push_back(color.g); verts.push_back(color.b);
+			verts.push_back(kQuadUV[i].x); verts.push_back(kQuadUV[i].y);
 		}
-	}
-
-	// 位置 / 欧拉角（度）/ 缩放 -> 模型矩阵
-	glm::mat4 ComposeTransform(const glm::vec3& pos, const glm::vec3& rotDeg, const glm::vec3& scale)
-	{
-		glm::mat4 m = glm::translate(glm::mat4(1.0f), pos);
-		m = glm::rotate(m, glm::radians(rotDeg.y), glm::vec3(0.0f, 1.0f, 0.0f));
-		m = glm::rotate(m, glm::radians(rotDeg.x), glm::vec3(1.0f, 0.0f, 0.0f));
-		m = glm::rotate(m, glm::radians(rotDeg.z), glm::vec3(0.0f, 0.0f, 1.0f));
-		m = glm::scale(m, scale);
-		return m;
+		indices.insert(indices.end(), { base, base + 1, base + 2, base, base + 2, base + 3 });
+		base += 4;
 	}
 }
+
+// 位置 / 欧拉角（度）/ 缩放 -> 模型矩阵
+glm::mat4 ComposeTransform(const glm::vec3& pos, const glm::vec3& rotDeg, const glm::vec3& scale)
+{
+	glm::mat4 m = glm::translate(glm::mat4(1.0f), pos);
+	m = glm::rotate(m, glm::radians(rotDeg.y), glm::vec3(0.0f, 1.0f, 0.0f));
+	m = glm::rotate(m, glm::radians(rotDeg.x), glm::vec3(1.0f, 0.0f, 0.0f));
+	m = glm::rotate(m, glm::radians(rotDeg.z), glm::vec3(0.0f, 0.0f, 1.0f));
+	m = glm::scale(m, scale);
+	return m;
+}
+
 
 // 相机
 glm::vec3 CScene::GetFront() const

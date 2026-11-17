@@ -46,7 +46,6 @@ bool CTexture::Load(const std::string& path, bool isColor)
 	glBindTexture(GL_TEXTURE_2D, m_id);
 
 	GLenum internalFormat = isColor ? GL_SRGB8_ALPHA8 : GL_RGBA8;
-	// 内部格式用 GL_RGBA8（sRGB 管线可换成 GL_SRGB8_ALPHA8）
 	glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
 	glGenerateMipmap(GL_TEXTURE_2D);
 

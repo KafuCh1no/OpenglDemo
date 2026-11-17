@@ -194,16 +194,28 @@ int main()
 	gScene.AddBox(gStone, -6.1f, 1.2f, -15.0f, -3.9f, 2.7f, -14.9f, pillarColor);  // 镜子
 
 	// 模型
+	// 桌子
 	CTexture tableAlbedo("assets/models/table-damaged/textures/Table-Damage_low_albedo.jpeg");
 	CTexture tableNormal("assets/models/table-damaged/textures/Table-Damage_low_normal.jpeg", false);
 
-	// 原模型约 52 x 22 x 28 单位，缩到约 1.3 x 0.57 x 0.7 米
+	//椅子
+	CTexture chairAlbedo("assets/models/chair/Textures/Blender_2K/T_Chair_BaseColor.jpg");
+	CTexture chairNormal("assets/models/chair/Textures/Blender_2K/T_Chair_Normal.png", false);
+
+	// 桌子原模型约 52 x 22 x 28 单位，缩到约 1.3 x 0.57 x 0.7 米
 	// 位置放在相机正前方（相机起始于 (1, 1.7, 9.2) 朝 -Z）
 	gScene.AddModel("assets/models/table-damaged/source/Table-Damage_low.obj",
 		glm::vec3(-2.5f, 0.0f, 6.0f),      // 位置
 		glm::vec3(0.0f),                   // 旋转（度）
 		glm::vec3(0.055f),                 // 缩放
 		{ &tableAlbedo, glm::vec3(1.0f), 1.0f, &tableNormal, 1.0f });
+
+	// 椅子
+	gScene.AddModel("assets/models/chair/SM_Chair.obj",
+		glm::vec3(-5.0f, 0.0f, 6.4f),        // ← 挪到桌子左边
+		glm::vec3(0.0f, 30.0f, 0.0f),        // ← 转 30°，朝向桌子
+		glm::vec3(1.25f),                // 缩放
+		{ &chairAlbedo, glm::vec3(1.0f), 1.0f, &chairNormal, 1.0f });
 
 	gScene.Build();
 	gScene.PrepareShadows(3);   // 3 盏聚光灯投影：壁炉 / 手电筒 / 洗手间

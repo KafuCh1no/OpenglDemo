@@ -93,7 +93,7 @@ bool CModel::Load(const std::string& path,
 
 			verts.push_back(px); verts.push_back(py); verts.push_back(pz);
 			verts.push_back(nx); verts.push_back(ny); verts.push_back(nz);
-			verts.push_back(1.0f); verts.push_back(1.0f); verts.push_back(1.0f);  // 顶点色填白
+			verts.push_back(1.0f); verts.push_back(1.0f); verts.push_back(1.0f);
 			verts.push_back(u);  verts.push_back(v);
 
 			unique[key] = newIndex;

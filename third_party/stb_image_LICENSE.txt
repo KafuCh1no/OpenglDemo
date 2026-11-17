@@ -1,0 +1,17 @@
+stb_image - v2.30 - public domain image loader - http://nothings.org/stb
+no warranty implied; use at your own risk
+
+作者：Sean Barrett（nothings.org）
+
+许可证
+------
+采用双许可，任选其一：
+
+ALTERNATIVE A - MIT License
+Copyright (c) 2017 Sean Barrett
+
+ALTERNATIVE B - Public Domain (www.unlicense.org)
+This is free and unencumbered software released into the public domain.
+
+完整文本见：
+https://github.com/nothings/stb/blob/master/LICENSE
