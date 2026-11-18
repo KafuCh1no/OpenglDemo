@@ -23,12 +23,14 @@ uniform int   lightType[MAX_LIGHTS];         // 0 = 点光, 1 = 聚光
 uniform sampler2D shadowMap0;
 uniform sampler2D shadowMap1;
 uniform sampler2D shadowMap2;
+uniform sampler2D shadowMap3;       // 平行光
 uniform mat4 lightSpaceMatrices[MAX_LIGHTS];
 
 // 点光源阴影：cubemap 里存的是「到光源的线性距离 / farPlane」
 uniform samplerCube shadowCube0;
 uniform samplerCube shadowCube1;
 uniform samplerCube shadowCube2;
+uniform samplerCube shadowCube3;
 uniform float pointFarPlane[MAX_LIGHTS];
 
 uniform vec3 viewPos;
@@ -92,27 +94,39 @@ void main()
     if (uHasTexture)
         albedo *= texture(albedoMap, uv).rgb;
 
-    vec3 result = 0.03 * albedo;                    // 极弱环境光，营造黑暗
+    // 极弱环境光，营造黑暗
+    vec3 result = 0.03 * albedo;
 
     for (int i = 0; i < MAX_LIGHTS; ++i)
     {
         if (i >= lightCount) break;
 
-        vec3  toLight = lightPos[i] - WorldPos;
-        float dist    = length(toLight);
-        // 片元 -> 光源
-        vec3  L       = toLight / max(dist, 1e-4);
+        vec3  L;
+        float attenuation = 1.0;
+        float spot        = 1.0;
 
-        // 距离衰减（二次）
-        float attenuation = 1.0 / (1.0 + 0.09 * dist + 0.032 * dist * dist);
-
-        // 聚光灯锥形衰减；点光直接为 1
-        float spot = 1.0;
-        if (lightType[i] == 1)
+        if (lightType[i] == 2)
         {
-            float theta = dot(L, normalize(-lightDirArr[i]));
-            float eps   = max(lightCutoff[i] - lightOuterCutoff[i], 1e-4);
-            spot = clamp((theta - lightOuterCutoff[i]) / eps, 0.0, 1.0);
+            // 平行光：只有方向，不使用 position，也不随距离衰减
+            L = normalize(-lightDirArr[i]);
+        }
+        else
+        {
+            vec3  toLight = lightPos[i] - WorldPos;
+            float dist    = length(toLight);
+            // 片元 -> 光源
+            L = toLight / max(dist, 1e-4);
+
+            // 距离衰减（二次）
+            attenuation = 1.0 / (1.0 + 0.09 * dist + 0.032 * dist * dist);
+
+            // 聚光灯锥形衰减；点光直接为 1
+            if (lightType[i] == 1)
+            {
+                float theta = dot(L, normalize(-lightDirArr[i]));
+                float eps   = max(lightCutoff[i] - lightOuterCutoff[i], 1e-4);
+                spot = clamp((theta - lightOuterCutoff[i]) / eps, 0.0, 1.0);
+            }
         }
 
         // Blinn-Phong
@@ -125,8 +139,9 @@ void main()
 
         vec3 radiance = lightColorArr[i] * lightIntensity[i] * attenuation * spot;
 
+        // 遮挡系数
         float occl = 1.0;
-        if (lightType[i] == 1)
+        if (lightType[i] == 1 || lightType[i] == 2)
         {
             // 聚光灯：2D 深度图
             vec4 lp = lightSpaceMatrices[i] * vec4(WorldPos, 1.0);
@@ -134,6 +149,7 @@ void main()
             if      (i == 0) shadow = ShadowCalculation(lp, shadowMap0);
             else if (i == 1) shadow = ShadowCalculation(lp, shadowMap1);
             else if (i == 2) shadow = ShadowCalculation(lp, shadowMap2);
+            else if (i == 3) shadow = ShadowCalculation(lp, shadowMap3);
             occl = 1.0 - shadow;
         }
         else if (lightType[i] == 0)

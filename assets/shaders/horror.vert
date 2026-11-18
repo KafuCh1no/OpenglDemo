@@ -22,7 +22,7 @@ void main()
     vec4 world4 = model * vec4(aPos, 1.0);
 
     WorldPos    = world4.xyz;
-    // 非等比缩放时，法线必须用 model 的逆转置矩阵变换
+    // 非等比缩放时，如果不用model逆矩阵会导致法线不垂直切线
     Normal      = mat3(transpose(inverse(model))) * aNormal;
     ObjectColor = aColor;
     TexCoords   = aUV;

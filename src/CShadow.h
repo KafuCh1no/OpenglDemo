@@ -37,7 +37,8 @@ public:
 		const glm::vec3& lightDir,
 		float outerConeDeg,
 		float nearZ,
-		float farZ);
+		float farZ,
+		float orthoHalfSize = 0.0f);
 
 	unsigned int GetDepthTexture() const { return m_depthTex; }
 	const glm::mat4& GetLightSpace() const { return m_lightSpace; }

@@ -14,20 +14,23 @@ class CShader;
 class CShadow;
 class CShadowCube;
 
-// 场景光源：点光 / 聚光，可选投影、可选跟随相机
+// 场景光源：点光 / 聚光 / 平行光，可选投影、可选跟随相机
 struct CLight
 {
-	glm::vec3 Position{ 0.0f };
+	glm::vec3 position{ 0.0f };
 	glm::vec3 direction{ 0.0f, 0.0f, -1.0f };
 	glm::vec3 color{ 1.0f };
 
 	float intensity      = 1.0f;
 	float range          = 10.0f;
-	float cutoffDeg      = 30.0f;   // 内锥角（度）
-	float outerCutoffDeg = 45.0f;   // 外锥角（度）
+	// 聚光灯内锥角（度）
+	float cutoffDeg      = 30.0f;
+	// 聚光灯外锥角（度）
+	float outerCutoffDeg = 45.0f;
 
-	// 0 = 点光, 1 = 聚光
-	int  type         = 1;      
+	// 0 = 点光, 1 = 聚光， 2 = 平行光
+	int  type         = 1;     
+	// 是否渲染深度图
 	bool castShadow   = true;
 	bool followCamera = false;
 	bool enabled      = true;
@@ -52,6 +55,7 @@ public:
 		glm::vec3                 modelRotDeg{ 0.0f };  // 欧拉角（度）
 		glm::vec3                 modelScale{ 1.0f };   // 缩放
 		bool                      useWorldUV = true;    // true = 世界 UV（墙面），false = 模型自带 UV
+		bool                      castShadow = true;    // false = 不写入阴影图（玻璃等需要透光的面片）
 		std::vector<float>        verts;
 		std::vector<unsigned int> indices;
 		std::unique_ptr<CMesh>    mesh;
@@ -63,7 +67,7 @@ public:
 	};
 
 	// 相机
-	glm::vec3 cameraPos{ 1.0f, 1.7f, 9.2f };
+	glm::vec3 cameraPos{ 1.0f, 1.85f, 9.2f };
 	glm::vec3 cameraUp{ 0.0f, 1.0f, 0.0f };
 	float yaw   = -90.0f;
 	float pitch = 0.0f;

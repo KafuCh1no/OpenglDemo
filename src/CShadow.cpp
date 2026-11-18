@@ -57,10 +57,23 @@ void CShadow::Render(const std::vector<DrawItem>& items,
 	const glm::vec3& lightDir,
 	float outerConeDeg,
 	float nearZ,
-	float farZ)
+	float farZ,
+	float orthoHalfSize)
 {
-	float fovY = glm::radians(outerConeDeg * 2.0f);
-	glm::mat4 proj = glm::perspective(fovY, 1.0f, nearZ, farZ);
+	glm::mat4 proj;
+	// orthoHalfSize为0代表为透视投影
+	if (orthoHalfSize == 0.0f)
+	{
+		// 透视投影
+		float fovY = glm::radians(outerConeDeg * 2.0f);
+		proj = glm::perspective(fovY, 1.0f, nearZ, farZ);
+	}
+	else
+	{
+		// 正交投影
+		proj = glm::ortho(-orthoHalfSize, orthoHalfSize, -orthoHalfSize, orthoHalfSize, nearZ, farZ);
+	}
+	
 
 	// 手电筒垂直朝下照时 lightDir 与 up 平行，cross 会退化成零向量，
 	glm::vec3 up(0.0f, 1.0f, 0.0f);

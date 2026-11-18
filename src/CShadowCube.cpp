@@ -49,7 +49,6 @@ void CShadowCube::CreateDepthCubemap()
 	glReadBuffer(GL_NONE);
 
 	// 先挂一个面，否则此刻 FBO 没有任何附件，状态检查会报 incomplete
-	// （Render 里会按当前面逐个替换 depth attachment）
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
 		GL_TEXTURE_CUBE_MAP_POSITIVE_X, m_depthCube, 0);
 
@@ -59,6 +58,7 @@ void CShadowCube::CreateDepthCubemap()
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
+// 渲染
 void CShadowCube::Render(const std::vector<CShadow::DrawItem>& items,
 	const glm::vec3& lightPos,
 	float nearZ,
@@ -92,10 +92,10 @@ void CShadowCube::Render(const std::vector<CShadow::DrawItem>& items,
 	m_depthShader.setVec3("lightPos", lightPos);
 	m_depthShader.setFloat("farPlane", farZ);
 
-	// 点光阴影不能剔正面：壁炉这类模型是双面材质、几何有薄片
-	// 剔掉正面后薄片处没有深度写入，光就漏过去了（影子出现缺口）
+	// 不剔除正面
 	glDisable(GL_CULL_FACE);
 
+	// 6次循环，渲染6次
 	for (int i = 0; i < 6; ++i)
 	{
 		const glm::mat4 view = glm::lookAt(lightPos, lightPos + dirs[i], ups[i]);

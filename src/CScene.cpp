@@ -256,7 +256,7 @@ void CScene::Render(CShader& shader, const glm::mat4& projection)
 	{
 		if (l.followCamera)
 		{
-			l.Position = cameraPos;
+			l.position = cameraPos;
 			l.direction = front;
 		}
 	}
@@ -269,7 +269,7 @@ void CScene::Render(CShader& shader, const glm::mat4& projection)
 	shadowItems.reserve(m_groups.size());
 	for (auto& g : m_groups)
 	{
-		if (g->mesh)
+		if (g->mesh && g->castShadow)
 		{
 			shadowItems.push_back({
 				g->mesh.get(),
@@ -293,18 +293,27 @@ void CScene::Render(CShader& shader, const glm::mat4& projection)
 
 		if (l.type == 1 && i < (int)m_shadowPasses.size())
 		{
-			m_shadowPasses[i]->Render(shadowItems, l.Position, l.direction,
+			// 聚光灯
+			m_shadowPasses[i]->Render(shadowItems, l.position, l.direction,
 				l.outerCutoffDeg, 0.1f, SHADOW_FAR);
 			shadowMats[i] = m_shadowPasses[i]->GetLightSpace();
 		}
 		else if (l.type == 0 && i < (int)m_cubePasses.size())
 		{
+			// 点光灯
 			// 首次用到这盏点光时才分配 cubemap（6 面 × 1024² 不算小）
 			if (!m_cubePasses[i])
 				m_cubePasses[i] = std::make_unique<CShadowCube>(1024);
 
-			m_cubePasses[i]->Render(shadowItems, l.Position, 0.1f, POINT_FAR);
+			m_cubePasses[i]->Render(shadowItems, l.position, 0.1f, POINT_FAR);
 			pointFar[i] = m_cubePasses[i]->GetFarPlane();
+		}
+		else if (l.type == 2 && i < (int)m_shadowPasses.size())
+		{
+			// 平行光：用 range 当正交盒半宽
+			m_shadowPasses[i]->Render(shadowItems, l.position, l.direction,
+				0.0f, 0.1f, SHADOW_FAR, l.range);
+			shadowMats[i] = m_shadowPasses[i]->GetLightSpace();
 		}
 	}
 
@@ -323,7 +332,7 @@ void CScene::Render(CShader& shader, const glm::mat4& projection)
 
 	for (const CLight& l : m_lights)
 	{
-		lPos.push_back(l.Position);
+		lPos.push_back(l.position);
 		lDir.push_back(l.direction);
 		lColor.push_back(l.color);
 		lIntensity.push_back(l.enabled ? l.intensity : 0.0f);
@@ -349,21 +358,25 @@ void CScene::Render(CShader& shader, const glm::mat4& projection)
 	shader.setMat4Array("lightSpaceMatrices[0]", shadowMats.data(), lightCount);
 	shader.setFloatArray("pointFarPlane[0]",    pointFar.data(), lightCount);
 
-	// 绑定阴影贴图：聚光走 2D，点光走 cubemap
+	// 绑定阴影贴图
+	// 0壁炉 1手电筒 2洗手间灯 3月光
 	for (int i = 0; i < lightCount; ++i)
 	{
 		const CLight& l = m_lights[i];
 		if (!l.castShadow || !l.enabled) continue;
 
-		if (l.type == 1 && i < (int)m_shadowPasses.size())
+		if ((l.type == 1 || l.type == 2) && i < (int)m_shadowPasses.size())
 		{
+			// 聚光 / 平行光：都是 2D 深度图
 			glActiveTexture(GL_TEXTURE0 + i);
 			glBindTexture(GL_TEXTURE_2D, m_shadowPasses[i]->GetDepthTexture());
 			shader.setInt("shadowMap" + std::to_string(i), i);
 		}
 		else if (l.type == 0 && i < (int)m_cubePasses.size() && m_cubePasses[i])
 		{
-			const int unit = 5 + i;   // 0~2 聚光、3 albedo、4 normal、5~7 点光 cubemap
+			// 点光
+			// 0~3 阴影、4 albedo、5 normal、6+ 点光 cubemap
+			const int unit = 6 + i;
 			glActiveTexture(GL_TEXTURE0 + unit);
 			glBindTexture(GL_TEXTURE_CUBE_MAP, m_cubePasses[i]->GetDepthCubemap());
 			shader.setInt("shadowCube" + std::to_string(i), unit);
@@ -378,9 +391,9 @@ void CScene::Render(CShader& shader, const glm::mat4& projection)
 		const CMaterial& mat = g->material;
 		if (mat.HasTexture())
 		{
-			// 0 1 2号纹理单元被阴影贴图占了 故选3
-			mat.texture->Bind(3);
-			shader.setInt("albedoMap", 3);
+			// 0~3 号单元被阴影贴图占了，故选 4
+			mat.texture->Bind(4);
+			shader.setInt("albedoMap", 4);
 			shader.setBool("uHasTexture", true);
 		}
 		else
@@ -390,8 +403,8 @@ void CScene::Render(CShader& shader, const glm::mat4& projection)
 
 		if (mat.HasNormalMap())
 		{
-			mat.normalMap->Bind(4);      // 4 号单元，避开 0/1/2 阴影和 3 albedo
-			shader.setInt("normalMap", 4);
+			mat.normalMap->Bind(5);      // 5 号单元，避开 0~3 阴影和 4 albedo
+			shader.setInt("normalMap", 5);
 			shader.setBool("uHasNormalMap", true);
 			shader.setFloat("uNormalStrength", mat.normalStrength);
 		}
