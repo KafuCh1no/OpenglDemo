@@ -207,6 +207,12 @@ int main()
 		}
 
 		ImGui::Separator();
+		int shadowMode = gScene.ShadowMode();
+		const char* kShadowModes[] = { "single tap", "PCF 3x3" };
+		if (ImGui::Combo("shadow filter", &shadowMode, kShadowModes, 2))
+			gScene.SetShadowMode(shadowMode);
+
+		ImGui::Separator();
 		ImGui::Text("Materials");
 		auto& groups = gScene.Groups();
 		for (int i = 0; i < (int)groups.size(); ++i)

@@ -47,7 +47,7 @@ public:
 private:
 	void CreateDepthFBO();
 
-	int m_size = 1024;
+	int m_size = 2048;
 
 	unsigned int m_fbo = 0;
 	unsigned int m_depthTex = 0;

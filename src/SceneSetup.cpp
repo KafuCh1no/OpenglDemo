@@ -226,26 +226,30 @@ void SetupScene(CScene& scene)
 		{ &tableAlbedo, glm::vec3(1.0f), 1.0f, &tableNormal, 1.0f });
 
 	// 椅子 x4
+	// 东南
 	scene.AddModel("assets/models/chair/SM_Chair.obj",
 		glm::vec3(-1.3f, 0.05f, 8.0f),
 		glm::vec3(3.0f, 90.0f, 90.0f),
 		glm::vec3(1.25f),
 		{ &chairAlbedo, glm::vec3(1.0f), 1.0f, &chairNormal, 1.0f });
 
+	// 西南
 	scene.AddModel("assets/models/chair/SM_Chair.obj",
 		glm::vec3(-2.7f, 0.0f, 8.0f),
 		glm::vec3(3.0f, 150.0f, 0.0f),
 		glm::vec3(1.25f),
 		{ &chairAlbedo, glm::vec3(1.0f), 1.0f, &chairNormal, 1.0f });
 
+	// 西北
 	scene.AddModel("assets/models/chair/SM_Chair.obj",
 		glm::vec3(-3.0f, 0.0f, 5.0f),
 		glm::vec3(-85.0f, 0.0f, 0.0f),
 		glm::vec3(1.25f),
 		{ &chairAlbedo, glm::vec3(1.0f), 1.0f, &chairNormal, 1.0f });
 
+	// 东北
 	scene.AddModel("assets/models/chair/SM_Chair.obj",
-		glm::vec3(-1.3f, 0.0f, 4.5f),
+		glm::vec3(-0.3f, 0.0f, 5.0f),
 		glm::vec3(0.0f, 60.0f, 0.0f),
 		glm::vec3(1.25f),
 		{ &chairAlbedo, glm::vec3(1.0f), 1.0f, &chairNormal, 1.0f });
@@ -435,6 +439,7 @@ void SetupScene(CScene& scene)
 	flashlight.outerCutoffDeg = 25.0f;
 	flashlight.castShadow     = true;
 	flashlight.followCamera   = true;
+	flashlight.followOffset   = glm::vec3(0.30f, -0.20f, 0.0f);   // 右手持：偏右 30 cm、略低于视线 20 cm
 	scene.AddLight(flashlight);
 
 	// 2 号：洗手间灯（聚光，固定）
@@ -455,10 +460,10 @@ void SetupScene(CScene& scene)
 	moonlight.type       = 2;
 	moonlight.color      = glm::vec3(0.55f, 0.68f, 1.0f);  // 月光冷蓝
 	moonlight.intensity  = 0.6f;
-	moonlight.direction  = glm::normalize(glm::vec3(1.0f, -1.0f, 0.0f));
-	moonlight.position   = glm::vec3(-24.4f, 14.9f, -3.0f);
+	moonlight.direction  = glm::normalize(glm::vec3(1.0f, 0.0f, 0.0f));
+	moonlight.position   = glm::vec3(-24.4f, 2.0f, -3.0f);
 	// 正交盒半宽
-	moonlight.range      = 20.0f;
+	moonlight.range      = 11.0f;
 	moonlight.castShadow = true;
 	scene.AddLight(moonlight);
 

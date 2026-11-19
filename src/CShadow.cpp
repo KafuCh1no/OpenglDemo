@@ -95,8 +95,6 @@ void CShadow::Render(const std::vector<DrawItem>& items,
 	m_depthShader.use();
 	m_depthShader.setMat4("lightSpaceMatrix", m_lightSpace);
 
-	// 只画背面
-
 	for (const DrawItem& it : items)
 	{
 		if (!it.mesh) continue;

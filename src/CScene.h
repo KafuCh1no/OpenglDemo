@@ -33,6 +33,8 @@ struct CLight
 	// 是否渲染深度图
 	bool castShadow   = true;
 	bool followCamera = false;
+	// 跟随相机时的偏移（相机空间：x 右 / y 上 / z 前），用来做「手持」效果
+	glm::vec3 followOffset{ 0.0f };
 	bool enabled      = true;
 };
 
@@ -111,6 +113,10 @@ public:
 	CLight& AddLight(const CLight& light);
 	std::vector<CLight>& Lights() { return m_lights; }
 
+	// 阴影采样模式：0 = 单点，1 = PCF 3x3
+	int  ShadowMode() const { return m_shadowMode; }
+	void SetShadowMode(int mode) { m_shadowMode = mode; }
+
 	// 材质分组（供 ImGui 调参）
 	std::vector<std::unique_ptr<Group>>& Groups() { return m_groups; }
 
@@ -132,4 +138,6 @@ private:
 	std::vector<std::unique_ptr<CShadow>>     m_shadowPasses;   // 聚光灯：2D 深度图
 	std::vector<std::unique_ptr<CShadowCube>> m_cubePasses;     // 点光源：cubemap
 	std::vector<Box>                          m_boxes;
+
+	int                                       m_shadowMode = 1;   // 1 = PCF 3x3
 };

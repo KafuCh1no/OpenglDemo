@@ -25,9 +25,13 @@
 2. 等待 CMake 自动配置
 3. F5 运行
 
+### 阴影
+原始：![问题截图](./docs/images/01.png)
+
 ### 命令行
 
 ```powershell
 cmake -S . -B out/build/x64-Debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
 cmake --build out/build/x64-Debug
 out/build/x64-Debug/Demo.exe
+

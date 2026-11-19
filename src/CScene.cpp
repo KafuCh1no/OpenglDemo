@@ -241,7 +241,7 @@ void CScene::PrepareShadows(int count)
 	for (int i = 0; i < count; ++i)
 	{
 		// 聚光：2D 深度图，每个都建（尺寸小）
-		m_shadowPasses.push_back(std::make_unique<CShadow>(1024));
+		m_shadowPasses.push_back(std::make_unique<CShadow>(2048));
 	}
 	// 点光 cube 在 Render 里按需创建：6 面 × 1024² 很占显存，
 	// 不是每盏点光都投影，没必要一次全建出来
@@ -252,13 +252,20 @@ void CScene::Render(CShader& shader, const glm::mat4& projection)
 {
 	const glm::vec3 front = GetFront();
 
-	// 手电筒
-	for (CLight& l : m_lights)
+	// 手电筒：位置跟着相机，可以带一个相机空间偏移（模拟手持在身体右侧）
 	{
-		if (l.followCamera)
+		const glm::vec3 right = GetRight();
+		const glm::vec3 up    = glm::cross(right, front);
+		for (CLight& l : m_lights)
 		{
-			l.position = cameraPos;
-			l.direction = front;
+			if (l.followCamera)
+			{
+				l.position  = cameraPos
+					+ right * l.followOffset.x
+					+ up    * l.followOffset.y
+					+ front * l.followOffset.z;
+				l.direction = front;
+			}
 		}
 	}
 
@@ -302,9 +309,8 @@ void CScene::Render(CShader& shader, const glm::mat4& projection)
 		else if (l.type == 0 && i < (int)m_cubePasses.size())
 		{
 			// 点光灯
-			// 首次用到这盏点光时才分配 cubemap（6 面 × 1024² 不算小）
 			if (!m_cubePasses[i])
-				m_cubePasses[i] = std::make_unique<CShadowCube>(1024);
+				m_cubePasses[i] = std::make_unique<CShadowCube>(2048);
 
 			m_cubePasses[i]->Render(shadowItems, l.position, 0.1f, POINT_FAR);
 			pointFar[i] = m_cubePasses[i]->GetFarPlane();
@@ -358,6 +364,9 @@ void CScene::Render(CShader& shader, const glm::mat4& projection)
 	shader.setIntArray("lightType[0]",          lType.data(),    lightCount);
 	shader.setMat4Array("lightSpaceMatrices[0]", shadowMats.data(), lightCount);
 	shader.setFloatArray("pointFarPlane[0]",    pointFar.data(), lightCount);
+
+	// 阴影采样模式（ImGui 可切换）
+	shader.setInt("uShadowMode", m_shadowMode);
 
 	// 绑定阴影贴图
 	// 0壁炉 1手电筒 2洗手间灯 3月光

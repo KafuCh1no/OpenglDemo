@@ -20,6 +20,9 @@ uniform float lightCutoff[MAX_LIGHTS];       // 内锥 cos 值
 uniform float lightOuterCutoff[MAX_LIGHTS];  // 外锥 cos 值
 uniform int   lightType[MAX_LIGHTS];         // 0 = 点光, 1 = 聚光
 
+// 阴影采样模式：0 = 单点采样，1 = PCF 3x3
+uniform int uShadowMode;
+
 uniform sampler2D shadowMap0;
 uniform sampler2D shadowMap1;
 uniform sampler2D shadowMap2;
@@ -173,38 +176,68 @@ void main()
     FragColor = vec4(pow(result, vec3(1.0 / 2.2)), 1.0);
 }
 
-// 阴影计算
+// 聚光、平行光阴影计算
+// uShadowMode = 0：单点采样（硬边，最快）
+// uShadowMode = 1：PCF 3x3（9 次采样，边缘 3 texel 过渡）
 float ShadowCalculation(vec4 fragPosLightSpace, sampler2D shadowMap)
 {
     vec3 proj = fragPosLightSpace.xyz / fragPosLightSpace.w;
     proj = proj * 0.5 + 0.5;
 
-    // outside the light frustum -> treat as lit
+    // 超出范围不投影
     if (proj.z > 1.0 || proj.x < 0.0 || proj.x > 1.0 || proj.y < 0.0 || proj.y > 1.0)
     {
         return 0.0;
     }
 
-    float closestDepth = texture(shadowMap, proj.xy).r;
     float currentDepth = proj.z;
+    float bias         = 0.0001;
 
-    // bias用来区分"真的被挡住"和"深度比较的误差"
-    float bias = 0.0001;
-    return currentDepth - bias > closestDepth ? 1.0 : 0.0;
+    // 单点采样
+    if (uShadowMode == 0)
+    {
+        float closestDepth = texture(shadowMap, proj.xy).r;
+        return (currentDepth - bias > closestDepth) ? 1.0 : 0.0;
+    }
+
+    // PCF 3x3
+    vec2  texelSize = 1.0 / vec2(textureSize(shadowMap, 0));
+    float shadow    = 0.0;
+    for (int x = -1; x <= 1; ++x)
+    {
+        for (int y = -1; y <= 1; ++y)
+        {
+            float closestDepth = texture(shadowMap, proj.xy + vec2(x, y) * texelSize).r;
+            shadow += (currentDepth - bias > closestDepth) ? 1.0 : 0.0;
+        }
+    }
+    return shadow / 9.0;
 }
 
-// 点光源阴影：比较到光源的线性距离
+// 点光源阴影
 // cubemap 里存的是 length(fragPos - lightPos) / farPlane（由 gl_FragDepth 写入）
 float PointShadowCalculation(vec3 fragPos, vec3 lightPos, samplerCube cube, float farPlane)
 {
     vec3  dir     = fragPos - lightPos;
     float current = length(dir) / farPlane;
+    float bias    = 0.015;
 
-    // dir 既是采样方向也是距离向量，GPU 按主轴自动选面
-    float closest = texture(cube, dir).r;
+    const vec3 kOffsets[20] = vec3[](
+        vec3( 1,  1,  1), vec3( 1, -1,  1), vec3(-1, -1,  1), vec3(-1,  1,  1),
+        vec3( 1,  1, -1), vec3( 1, -1, -1), vec3(-1, -1, -1), vec3(-1,  1, -1),
+        vec3( 1,  1,  0), vec3( 1, -1,  0), vec3(-1, -1,  0), vec3(-1,  1,  0),
+        vec3( 1,  0,  1), vec3(-1,  0,  1), vec3( 1,  0, -1), vec3(-1,  0, -1),
+        vec3( 0,  1,  1), vec3( 0, -1,  1), vec3( 0, -1, -1), vec3( 0,  1, -1)
+    );
 
-    // 6 个面朝向不同，acne 程度不一样，bias 取比聚光大的折中值
-    // 注意这里是「归一化到 farPlane 的距离」，0.015 * 30m = 0.45m
-    float bias = 0.015;
-    return current - bias > closest ? 1.0 : 0.0;
+    float texelAngle = 25.0 / float(textureSize(cube, 0).x);
+    float diskRadius = texelAngle * 1.5;
+
+    float shadow = 0.0;
+    for (int i = 0; i < 20; ++i)
+    {
+        float closest = texture(cube, dir + kOffsets[i] * diskRadius).r;
+        shadow += (current - bias > closest) ? 1.0 : 0.0;
+    }
+    return shadow / 20.0;
 }
