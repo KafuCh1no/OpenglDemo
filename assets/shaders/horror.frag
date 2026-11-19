@@ -188,9 +188,9 @@ float ShadowCalculation(vec4 fragPosLightSpace, sampler2D shadowMap)
     float closestDepth = texture(shadowMap, proj.xy).r;
     float currentDepth = proj.z;
 
-    // bias用来区分"真的被挡住"和"深度比较的误差",目前暂时用不到
-    float bias = 0.0002;   // 5 cm
-    return currentDepth > closestDepth ? 1.0 : 0.0;
+    // bias用来区分"真的被挡住"和"深度比较的误差"
+    float bias = 0.0001;
+    return currentDepth - bias > closestDepth ? 1.0 : 0.0;
 }
 
 // 点光源阴影：比较到光源的线性距离

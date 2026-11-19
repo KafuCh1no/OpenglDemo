@@ -31,45 +31,47 @@ void SetupScene(CScene& scene)
 	// ---- 纯色 ----
 	const glm::vec3 floorColor(0.35f, 0.32f, 0.28f);
 	const glm::vec3 wallColor(0.95f, 0.93f, 0.9f);
-	const glm::vec3 paintedWallColor(0.95f, 0.93f, 0.9f);
-	const glm::vec3 pillarColor(0.30f, 0.22f, 0.18f);
 	const glm::vec3 ceilingColor(0.32f, 0.20f, 0.12f);
 
 	// ---- 墙壁 / 地板贴图 ----
-	CTexture& wallTex           = Tex("assets/textures/Plaster006_2K-JPG_Color.jpg");
-	CTexture& wallNormal        = Tex("assets/textures/Plaster006_2K-JPG_NormalGL.jpg", false);
-	CTexture& paintedWallTex    = Tex("assets/textures/PaintedPlaster014_2K-JPG_Color.jpg");
-	CTexture& paintedWallNormal = Tex("assets/textures/PaintedPlaster014_2K-JPG_NormalGL.jpg", false);
+	// 墙纸：从浴室资产包的 Wall_Trim 图集里裁出的无缝花纹（205px 一个周期，取 2 个周期）
+	CTexture& wallpaperTex    = Tex("assets/textures/WallpaperOld_Color.jpg");
+	CTexture& wallpaperNormal = Tex("assets/textures/WallpaperOld_NormalGL.jpg", false);
 	CTexture& floorTex          = Tex("assets/textures/WoodFloor007_2K-JPG_Color.jpg");
 	CTexture& floorNormal       = Tex("assets/textures/WoodFloor007_2K-JPG_NormalGL.jpg", false);
+	CTexture& bathroomWallTex = Tex("assets/textures/Tiles010_2K-JPG_Color.jpg");
+	CTexture& bathroomWallNormal = Tex("assets/textures/Tiles010_2K-JPG_NormalGL.jpg");
+	// 墙裙：资产包墙板原图集，UV 是墙板自带的，不能用世界 UV 平铺
+	CTexture& wainscotAlbedo  = Tex("assets/models/the_bathroom_free/textures/Wall_Trim_baseColor.png");
+	CTexture& wainscotNormal  = Tex("assets/models/the_bathroom_free/textures/Wall_Trim_normal.png", false);
 
 	// ---- 材质分组 ----
-	auto& gWall        = scene.NewGroup({ &wallTex,        glm::vec3(1.0f), 0.4f,  &wallNormal,        1.0f });
-	auto& gPaintedWall = scene.NewGroup({ &paintedWallTex, glm::vec3(1.0f), 0.25f, &paintedWallNormal, 1.0f });
+	// 餐厅 + 走廊墙面：墙纸，贴图含 2 个周期 = 0.273 米，2.5 表示每米重复 2.5 次
+	auto& gWall        = scene.NewGroup({ &wallpaperTex, glm::vec3(1.0f), 2.5f, &wallpaperNormal, 1.0f });
 	auto& gFloor       = scene.NewGroup({ &floorTex,       glm::vec3(1.0f), 0.4f,  &floorNormal,       1.0f });
-	auto& gCeiling        = scene.NewGroup({ nullptr, glm::vec3(1.0f), 1.0f });
-	auto& gStone       = scene.NewGroup({ nullptr, glm::vec3(1.0f), 1.0f });
+	auto& gCeiling     = scene.NewGroup({ nullptr, glm::vec3(1.0f), 1.0f });
+	auto& gbathroomWall = scene.NewGroup({ &bathroomWallTex, glm::vec3(1.0f), 0.4f, &bathroomWallNormal, 1.0f });
 
 	// ---- 地面 / 天花板 ----
 	scene.AddBox(gFloor, -10.0f, -0.5f, 0.0f, 4.0f, 0.0f, 10.0f, floorColor);
 	scene.AddBox(gFloor, -10.0f, -0.5f, -16.0f, -5.75f, 0.0f, 0.0f, floorColor);
 	scene.AddBox(gFloor, -5.75f, -0.5f, -15.0f, -1.0f, 0.0f, -11.0f, floorColor);
 
-	scene.AddBox(gCeiling, -10.0f, 4.0f, 0.0f, 4.0f, 4.5f, 10.0f, ceilingColor);
+	scene.AddBox(gCeiling, -10.0f, 4.0f, -0.5f, 4.5f, 4.5f, 10.0f, ceilingColor);
 	scene.AddBox(gCeiling, -10.0f, 4.0f, -16.0f, -5.75f, 4.5f, 0.0f, ceilingColor);
-	scene.AddBox(gCeiling, -5.75f, 4.0f, -15.0f, -1.0f, 4.5f, -11.0f, ceilingColor);
+	scene.AddBox(gCeiling, -5.75f, 4.0f, -15.5f, -1.0f, 4.5f, -10.5f, ceilingColor);
 
 	// ---- 厨房 / 餐厅墙 ----
 	// 南墙（在 x ∈ [0.279, 1.721]、y ∈ [0, 2.840] 处开门口，对应木门）
 	scene.AddBox(gWall, -10.5f, 0.0f, 10.0f, 0.279f, 4.0f, 10.5f, wallColor);      // 门口左侧
 	scene.AddBox(gWall, 1.721f, 0.0f, 10.0f, 4.5f, 4.0f, 10.5f, wallColor);        // 门口右侧
 	scene.AddBox(gWall, 0.279f, 3.0f, 10.0f, 1.721f, 4.0f, 10.5f, wallColor);      // 门楣上
-	scene.AddBox(gPaintedWall, 4.0f, 0.0f, -0.5f, 4.5f, 4.0f, 10.5f, paintedWallColor); // 东墙
+	scene.AddBox(gWall, 4.0f, 0.0f, -0.5f, 4.5f, 4.0f, 10.5f, wallColor);          // 东墙
 	// 西墙
 	scene.AddBox(gWall, -10.5f, 0.0f, -0.5f, -10.0f, 4.0f, 4.25f, wallColor);      // 窗洞左侧
 	scene.AddBox(gWall, -10.5f, 0.0f, 5.74f, -10.0f, 4.0f, 10.5f, wallColor);      // 窗洞右侧
 	scene.AddBox(gWall, -10.5f, 0.0f, 4.25f, -10.0f, 1.01f, 5.74f, wallColor);     // 窗台下
-	scene.AddBox(gWall, -10.5f, 3.5f, 4.25f, -10.0f, 4.0f, 5.74f, wallColor);      // 窗楣上
+	scene.AddBox(gWall, -10.5f, 3.4f, 4.25f, -10.0f, 4.0f, 5.74f, wallColor);      // 窗楣上
 	scene.AddBox(gWall, -5.75f, 0.0f, -0.5f, 4.5f, 4.0f, 0.0f, wallColor);         // 北墙（走廊开口）
 
 	// ---- 走廊（x ∈ [-10, -5.75]，净宽 4.25 米；入口墙厚 0.25）----
@@ -79,11 +81,11 @@ void SetupScene(CScene& scene)
 	scene.AddBox(gWall, -10.5f, 0.0f, -7.5f, -10.0f, 4.0f, -4.25f, wallColor);       // 窗洞2-3 之间
 	scene.AddBox(gWall, -10.5f, 0.0f, -2.75f, -10.0f, 4.0f, 0.0f, wallColor);        // 窗洞3 右侧
 	scene.AddBox(gWall, -10.5f, 0.0f, -13.75f, -10.0f, 1.01f, -12.25f, wallColor);   // 窗洞1 窗台下
-	scene.AddBox(gWall, -10.5f, 3.5f, -13.75f, -10.0f, 4.0f, -12.25f, wallColor);    // 窗洞1 窗楣上
+	scene.AddBox(gWall, -10.5f, 3.4f, -13.75f, -10.0f, 4.0f, -12.25f, wallColor);    // 窗洞1 窗楣上
 	scene.AddBox(gWall, -10.5f, 0.0f, -9.0f, -10.0f, 1.01f, -7.5f, wallColor);       // 窗洞2 窗台下
-	scene.AddBox(gWall, -10.5f, 3.5f, -9.0f, -10.0f, 4.0f, -7.5f, wallColor);        // 窗洞2 窗楣上
+	scene.AddBox(gWall, -10.5f, 3.4f, -9.0f, -10.0f, 4.0f, -7.5f, wallColor);        // 窗洞2 窗楣上
 	scene.AddBox(gWall, -10.5f, 0.0f, -4.25f, -10.0f, 1.01f, -2.75f, wallColor);     // 窗洞3 窗台下
-	scene.AddBox(gWall, -10.5f, 3.5f, -4.25f, -10.0f, 4.0f, -2.75f, wallColor);      // 窗洞3 窗楣上
+	scene.AddBox(gWall, -10.5f, 3.4f, -4.25f, -10.0f, 4.0f, -2.75f, wallColor);      // 窗洞3 窗楣上
 
 	// 走廊入口
 	scene.AddBox(gWall, -10.0f, 0.0f, -0.25f, -8.8f, 4.0f, 0.0f, wallColor);        // 门口左侧
@@ -102,14 +104,69 @@ void SetupScene(CScene& scene)
 	scene.AddBox(gWall, -5.75f, 0.0f, -12.48f, -5.5f, 4.0f, -12.4f, wallColor);     // 门框右侧
 	scene.AddBox(gWall, -5.75f, 3.09f, -13.92f, -5.5f, 4.0f, -12.48f, wallColor);   // 门楣上
 
-	// ---- 洗手间 ----
-	scene.AddBox(gWall, -5.75f, 0.0f, -15.5f, -0.5f, 4.0f, -15.0f, wallColor);      // 北墙
-	scene.AddBox(gWall, -1.0f, 0.0f, -15.5f, -0.5f, 4.0f, -10.5f, wallColor);       // 东墙
-	scene.AddBox(gWall, -5.75f, 0.0f, -11.0f, -0.5f, 4.0f, -10.5f, wallColor);      // 南墙
+	// 洗手间 
+	scene.AddBox(gbathroomWall, -5.60f, 0.0f, -15.5f, -0.65f, 4.0f, -15.0f, wallColor);     // 北墙
+	scene.AddBox(gbathroomWall, -1.0f, 0.0f, -15.5f, -0.5f, 4.0f, -10.5f, wallColor);       // 东墙
+	scene.AddBox(gbathroomWall, -5.60f, 0.0f, -11.0f, -0.65f, 4.0f, -10.5f, wallColor);     // 南墙
+
+	// 护墙板 
+	// wainscot.obj 是从资产包 Wall_Clear_long 里切出的腰线以下部分：2.727 x 0.919 米、厚 5 厘米，
+	// 背面在 z=0、正面朝 +Z。有窗的墙按窗洞拆段：窗间全高，窗下压到窗台以下。
+	{
+		const float kModelW = 2.727f;   // obj 的原始宽度，横向缩放必须按它算
+		const float kModW   = 3.0f;     // 目标单块宽度，只决定分几块
+		const float kFull   = 1.70f;    // 全高：0.919 x 1.70 ≈ 1.56 米
+		const float kLow    = 1.09f;    // 窗下：1.00 米（窗台在 y = 1.01）
+
+		// start = 墙段起点，along = 沿墙方向，len = 段长，rotY = 让 +Z 朝室内，kH = 高度倍率
+		auto placeWainscot = [&](const glm::vec3& start, const glm::vec3& along,
+			float len, float rotY, float kH)
+		{
+			// 至少 1 块
+			const int   n  = (int)((len - 1e-4f) / kModW) + 1;
+			// 每块实际宽度
+			const float w  = len / n;
+			// 横向缩放
+			const float sx = w / kModelW;
+
+			for (int i = 0; i < n; ++i)
+			{
+				const glm::vec3 p = start + along * ((i + 0.5f) * w);
+				scene.AddModel("assets/models/the_bathroom_free/wainscot.obj",
+					p, glm::vec3(0.0f, rotY, 0.0f), glm::vec3(sx, kH, 1.0f),
+					{ &wainscotAlbedo, glm::vec3(1.0f), 1.0f, &wainscotNormal, 1.0f },
+					false);
+			}
+		};
+
+		// 餐厅
+		placeWainscot(glm::vec3(-10.0f, 0.0f, 10.0f), glm::vec3(1, 0, 0), 10.279f, 180.0f, kFull);  // 南墙（门洞左侧）
+		placeWainscot(glm::vec3(1.721f, 0.0f, 10.0f), glm::vec3(1, 0, 0), 2.279f, 180.0f, kFull);   // 南墙（门洞右侧）
+		placeWainscot(glm::vec3(4.0f, 0.0f, 0.0f), glm::vec3(0, 0, 1), 10.0f, -90.0f, kFull);        // 东墙
+		placeWainscot(glm::vec3(-5.75f, 0.0f, 0.0f), glm::vec3(1, 0, 0), 9.75f, 0.0f, kFull);        // 北墙
+		// 西墙：窗洞 z ∈ [4.25, 5.74]，三段绕开
+		placeWainscot(glm::vec3(-10.0f, 0.0f, 0.0f), glm::vec3(0, 0, 1), 4.25f, 90.0f, kFull);       // 窗南
+		placeWainscot(glm::vec3(-10.0f, 0.0f, 4.25f), glm::vec3(0, 0, 1), 1.49f, 90.0f, kLow);       // 窗下
+		placeWainscot(glm::vec3(-10.0f, 0.0f, 5.74f), glm::vec3(0, 0, 1), 4.26f, 90.0f, kFull);      // 窗北
+
+		// 走廊西墙：三个窗洞，七段
+		placeWainscot(glm::vec3(-10.0f, 0.0f, -16.0f), glm::vec3(0, 0, 1), 2.25f, 90.0f, kFull);     // 尽头到窗1
+		placeWainscot(glm::vec3(-10.0f, 0.0f, -13.75f), glm::vec3(0, 0, 1), 1.50f, 90.0f, kLow);     // 窗1 下
+		placeWainscot(glm::vec3(-10.0f, 0.0f, -12.25f), glm::vec3(0, 0, 1), 3.25f, 90.0f, kFull);    // 窗1-2 之间
+		placeWainscot(glm::vec3(-10.0f, 0.0f, -9.0f), glm::vec3(0, 0, 1), 1.50f, 90.0f, kLow);       // 窗2 下
+		placeWainscot(glm::vec3(-10.0f, 0.0f, -7.5f), glm::vec3(0, 0, 1), 3.25f, 90.0f, kFull);      // 窗2-3 之间
+		placeWainscot(glm::vec3(-10.0f, 0.0f, -4.25f), glm::vec3(0, 0, 1), 1.50f, 90.0f, kLow);      // 窗3 下
+		placeWainscot(glm::vec3(-10.0f, 0.0f, -2.75f), glm::vec3(0, 0, 1), 2.75f, 90.0f, kFull);     // 窗3 到入口
+
+		// 走廊东墙 + 尽头墙（门洞两侧断开）
+		placeWainscot(glm::vec3(-5.5f, 0.0f, -16.0f), glm::vec3(0, 0, 1), 2.08f, -90.0f, kFull);     // 洗手间门北侧
+		placeWainscot(glm::vec3(-5.5f, 0.0f, -12.48f), glm::vec3(0, 0, 1), 12.48f, -90.0f, kFull);   // 门南侧
+		placeWainscot(glm::vec3(-10.0f, 0.0f, -16.0f), glm::vec3(1, 0, 0), 1.28f, 0.0f, kFull);      // 尽头墙左
+		placeWainscot(glm::vec3(-7.28f, 0.0f, -16.0f), glm::vec3(1, 0, 0), 1.78f, 0.0f, kFull);      // 尽头墙右
+	}
 
 	// ---- 石砌 / 镜面 ----
-	scene.AddBox(gStone, -6.0f, 0.0f, -14.6f, -4.0f, 0.9f, -13.9f, wallColor);      // 洗手台
-	scene.AddBox(gStone, -5.9f, 1.2f, -15.0f, -3.9f, 2.7f, -14.9f, pillarColor);    // 镜子
+	// 洗手台与镜子已换成真模型，见文件末尾
 
 	// ---- 模型贴图 ----
 	CTexture& tableAlbedo  = Tex("assets/models/table-damaged/textures/Table-Damage_low_albedo.jpeg");
@@ -144,6 +201,16 @@ void SetupScene(CScene& scene)
 
 	CTexture& doorAlbedo = Tex("assets/models/door/textures/Default_baseColor.png");
 	CTexture& doorNormal = Tex("assets/models/door/textures/Default_normal.png", false);
+
+	// 浴室资产包（Sketchfab, CC BY 4.0, by Evan）：浴缸 / 洗手台 / 镜子
+	CTexture& bathtubAlbedo = Tex("assets/models/the_bathroom_free/textures/Bath_baseColor.png");
+	CTexture& bathtubNormal = Tex("assets/models/the_bathroom_free/textures/Bath_normal.png", false);
+	CTexture& sinkAlbedo    = Tex("assets/models/the_bathroom_free/textures/Bathtube_baseColor.png");
+	CTexture& sinkNormal    = Tex("assets/models/the_bathroom_free/textures/Bathtube_normal.png", false);
+	CTexture& mirrorAlbedo  = Tex("assets/models/the_bathroom_free/textures/Frames_baseColor.png");
+	CTexture& mirrorNormal  = Tex("assets/models/the_bathroom_free/textures/Frames_normal.png", false);
+	CTexture& tileAlbedo    = Tex("assets/models/the_bathroom_free/textures/Floor_baseColor.png");
+	CTexture& tileNormal    = Tex("assets/models/the_bathroom_free/textures/Floor_normal.png", false);
 
 	// ---- 可编辑模型表 ----
 	auto reg = [](std::string name, CScene::Group& g)
@@ -297,6 +364,46 @@ void SetupScene(CScene& scene)
 		reg("DoorBathroom", g);
 	}
 
+
+	// ---- 洗手间 ----
+	// 洗手台 1.10 x 1.10 x 0.78：原始资产里背面朝 +Z 贴 z≈10.1 的墙，转 180° 让它贴北墙 z=-15
+	{
+		auto& g = scene.AddModel("assets/models/the_bathroom_free/sink.obj",
+			glm::vec3(-4.4f, 0.0f, -14.608f),
+			glm::vec3(0.0f, 180.0f, 0.0f),
+			glm::vec3(1.5f),
+			{ &sinkAlbedo, glm::vec3(1.0f), 1.0f, &sinkNormal, 1.0f });
+		reg("BathroomSink", g);
+	}
+
+	// 镜子 1.05 x 0.83 x 0.11：挂在洗手台正上方
+	{
+		auto& g = scene.AddModel("assets/models/the_bathroom_free/mirror.obj",
+			glm::vec3(-4.4f, 1.865f, -14.946f),
+			glm::vec3(0.0f, 180.0f, 0.0f),
+			glm::vec3(1.5f),
+			{ &mirrorAlbedo, glm::vec3(1.0f), 1.0f, &mirrorNormal, 1.0f });
+		reg("BathroomMirror", g);
+	}
+
+	// 浴缸 1.60 x 0.93 x 0.77：长边沿 X 贴南墙 z=-11，放在南墙东段避开斜开的门
+	{
+		auto& g = scene.AddModel("assets/models/the_bathroom_free/bathtub.obj",
+			glm::vec3(-2.7f, 0.0f, -11.42f),
+			glm::vec3(0.0f),
+			glm::vec3(1.5f),
+			{ &bathtubAlbedo, glm::vec3(1.0f), 1.0f, &bathtubNormal, 1.0f });
+		reg("BathroomTub", g);
+	}
+
+	// 地砖：资产包的 Floor tile 5.455 x 5.455 米，缩放到 4.75 x 4.00 正好铺满洗手间
+	scene.AddModel("assets/models/the_bathroom_free/floor_tile.obj",
+		glm::vec3(-3.375f, 0.002f, -13.0f),
+		glm::vec3(0.0f),
+		glm::vec3(0.8708f, 1.0f, 0.7333f),
+		{ &tileAlbedo, glm::vec3(1.0f), 1.0f, &tileNormal, 1.0f },
+		false);
+
 	// ---- 提交几何 ----
 	scene.Build();
 	// 4 个 2D 阴影槽，对应灯索引 0~3；蜡烛(索引 4)不投影，不需要槽位
@@ -314,7 +421,7 @@ void SetupScene(CScene& scene)
 	CLight fireplace;
 	fireplace.type       = 0;
 	fireplace.color      = glm::vec3(1.0f, 0.55f, 0.25f);
-	fireplace.intensity  = 0.3f;
+	fireplace.intensity  = 0.0f;
 	fireplace.position   = glm::vec3(2.50f, 0.70f, 0.90f);
 	fireplace.castShadow = true;
 	scene.AddLight(fireplace);
@@ -346,12 +453,12 @@ void SetupScene(CScene& scene)
 	// 保证整栋房子都落在 [near, far] 之间
 	CLight moonlight;
 	moonlight.type       = 2;
-	moonlight.color      = glm::vec3(0.55f, 0.68f, 1.0f);
+	moonlight.color      = glm::vec3(0.55f, 0.68f, 1.0f);  // 月光冷蓝
 	moonlight.intensity  = 0.6f;
-	moonlight.direction  = glm::normalize(glm::vec3(0.35f, -1.0f, -0.25f));
-	moonlight.position   = glm::vec3(-3.0f, 2.0f, -3.0f) - moonlight.direction * 25.0f;
+	moonlight.direction  = glm::normalize(glm::vec3(1.0f, -1.0f, 0.0f));
+	moonlight.position   = glm::vec3(-24.4f, 14.9f, -3.0f);
 	// 正交盒半宽
-	moonlight.range      = 18.0f;
+	moonlight.range      = 20.0f;
 	moonlight.castShadow = true;
 	scene.AddLight(moonlight);
 

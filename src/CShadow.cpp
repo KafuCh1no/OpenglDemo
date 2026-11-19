@@ -74,7 +74,6 @@ void CShadow::Render(const std::vector<DrawItem>& items,
 		proj = glm::ortho(-orthoHalfSize, orthoHalfSize, -orthoHalfSize, orthoHalfSize, nearZ, farZ);
 	}
 	
-
 	// 手电筒垂直朝下照时 lightDir 与 up 平行，cross 会退化成零向量，
 	glm::vec3 up(0.0f, 1.0f, 0.0f);
 	if (std::abs(glm::dot(glm::normalize(lightDir), up)) > 0.99f)
@@ -87,6 +86,8 @@ void CShadow::Render(const std::vector<DrawItem>& items,
 	GLint vp[4];
 	glGetIntegerv(GL_VIEWPORT, vp);
 
+	glEnable(GL_CULL_FACE);
+	glCullFace(GL_FRONT);
 	glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
 	glViewport(0, 0, m_size, m_size);
 	glClear(GL_DEPTH_BUFFER_BIT);
@@ -95,8 +96,7 @@ void CShadow::Render(const std::vector<DrawItem>& items,
 	m_depthShader.setMat4("lightSpaceMatrix", m_lightSpace);
 
 	// 只画背面
-	glEnable(GL_CULL_FACE);
-	glCullFace(GL_FRONT);
+
 	for (const DrawItem& it : items)
 	{
 		if (!it.mesh) continue;

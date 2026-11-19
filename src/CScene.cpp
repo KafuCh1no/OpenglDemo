@@ -114,7 +114,8 @@ CScene::Group& CScene::AddModel(const std::string& path,
 	const glm::vec3& position,
 	const glm::vec3& rotationDeg,
 	const glm::vec3& scale,
-	const CMaterial& material)
+	const CMaterial& material,
+	bool collide)
 {
 	m_groups.push_back(std::make_unique<Group>());
 	Group& g = *m_groups.back();
@@ -145,7 +146,7 @@ CScene::Group& CScene::AddModel(const std::string& path,
 	g.localMax = lmx;
 
 	// 用包围盒的 8 个角点算世界 AABB（ImGui 改位置后 RefreshBox 走同样逻辑）
-	if (lmn.x <= lmx.x)
+	if (collide && lmn.x <= lmx.x)
 	{
 		const glm::mat4 transform = ComposeTransform(position, rotationDeg, scale);
 

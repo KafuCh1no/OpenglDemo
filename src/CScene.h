@@ -92,11 +92,13 @@ public:
 
 	// 加载 .obj 模型：位置/旋转/缩放分开传，方便 ImGui 直接调
 	// 纹理走模型自带 UV；加载成功后自动按世界坐标算一个 AABB 加进碰撞盒
+	// collide = false：不生成碰撞盒（贴地/贴墙的装饰面片，例如地砖、地毯）
 	Group& AddModel(const std::string& path,
 		const glm::vec3& position,
 		const glm::vec3& rotationDeg,
 		const glm::vec3& scale,
-		const CMaterial& material);
+		const CMaterial& material,
+		bool collide = true);
 
 	// 把所有分组的顶点上传到 GPU，并释放 CPU 侧数据 
 	void Build();
