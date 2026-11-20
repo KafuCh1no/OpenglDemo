@@ -248,7 +248,22 @@ void CScene::PrepareShadows(int count)
 	m_cubePasses.resize(count);
 }
 
-void CScene::Render(CShader& shader, const glm::mat4& projection)
+// ---- 阴影信息访问（供体积雾等子系统使用）----
+unsigned int CScene::GetShadowMapTexture(int lightIndex) const
+{
+	if (lightIndex < 0 || lightIndex >= (int)m_shadowPasses.size()) return 0;
+	if (!m_shadowPasses[lightIndex]) return 0;
+	return m_shadowPasses[lightIndex]->GetDepthTexture();
+}
+
+glm::mat4 CScene::GetLightSpaceMatrix(int lightIndex) const
+{
+	if (lightIndex < 0 || lightIndex >= (int)m_shadowPasses.size()) return glm::mat4(1.0f);
+	if (!m_shadowPasses[lightIndex]) return glm::mat4(1.0f);
+	return m_shadowPasses[lightIndex]->GetLightSpace();
+}
+
+void CScene::Render(CShader& shader, const glm::mat4& projection, bool hdr)
 {
 	const glm::vec3 front = GetFront();
 
@@ -367,6 +382,9 @@ void CScene::Render(CShader& shader, const glm::mat4& projection)
 
 	// 阴影采样模式（ImGui 可切换）
 	shader.setInt("uShadowMode", m_shadowMode);
+
+	// HDR 模式由主循环决定：false 时 shader 自己编码，不经过浮点缓冲
+	shader.setBool("uHDR", hdr);
 
 	// 绑定阴影贴图
 	// 0壁炉 1手电筒 2洗手间灯 3月光

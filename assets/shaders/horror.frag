@@ -23,6 +23,11 @@ uniform int   lightType[MAX_LIGHTS];         // 0 = 点光, 1 = 聚光
 // 阴影采样模式：0 = 单点采样，1 = PCF 3x3
 uniform int uShadowMode;
 
+// HDR 总开关：
+//   true  = 输出线性值，sRGB 编码交给 tonemap pass（走浮点缓冲）
+//   false = 本 shader 自己编码，直接写 8 bit 窗口，和加 HDR 之前完全一致
+uniform bool uHDR;
+
 uniform sampler2D shadowMap0;
 uniform sampler2D shadowMap1;
 uniform sampler2D shadowMap2;
@@ -99,6 +104,8 @@ void main()
 
     // 极弱环境光，营造黑暗
     vec3 result = 0.03 * albedo;
+    // 体积光判断采样点在不在光照范围内
+    float atten = 0.0f;
 
     for (int i = 0; i < MAX_LIGHTS; ++i)
     {
@@ -112,6 +119,7 @@ void main()
         {
             // 平行光：只有方向，不使用 position，也不随距离衰减
             L = normalize(-lightDirArr[i]);
+            atten = 1.0f;
         }
         else
         {
@@ -172,9 +180,10 @@ void main()
     float fog = 1.0 - exp(-0.045 * length(viewPos - WorldPos));
     result = mix(result, vec3(0.0), fog);
 
-    // 直接输出线性值：sRGB 编码移到 tonemap pass
-    // 这样 > 1.0 的高光能完整存进 GL_RGBA16F，不会被 8 bit 硬切成白色
-    FragColor = vec4(result, 1.0);
+    if (uHDR)
+        FragColor = vec4(result, 1.0);
+    else
+        FragColor = vec4(pow(result, vec3(1.0 / 2.2)), 1.0);
 }
 
 // 黄金角螺旋（Vogel 分布）：单位圆内第 i 个采样点（共 n 个）

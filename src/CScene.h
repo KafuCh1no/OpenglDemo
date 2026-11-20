@@ -126,11 +126,18 @@ public:
 	const std::vector<Box>& Boxes() const { return m_boxes; }
 
 	// 渲染
-	// 内部依次执行：阴影 Pass -> 传灯光/相机 uniform -> 按材质绘制几何 
-	void Render(CShader& shader, const glm::mat4& projection);
+	// 内部依次执行：阴影 Pass -> 传灯光/相机 uniform -> 按材质绘制几何
+	// hdr = true：输出线性值（配合 CHDR 的浮点缓冲 + 色调映射）
+	// hdr = false：shader 自己编码 sRGB，直接写默认帧缓冲
+	void Render(CShader& shader, const glm::mat4& projection, bool hdr = true);
 
 	// 预先创建n个阴影 Pass
 	void PrepareShadows(int count = 3);
+
+	// 某个光源的阴影信息（体积雾等子系统读取）
+	// 该索引没有可用的 2D 阴影图时返回 0 / 单位矩阵
+	unsigned int GetShadowMapTexture(int lightIndex) const;
+	glm::mat4    GetLightSpaceMatrix(int lightIndex) const;
 
 private:
 	std::vector<std::unique_ptr<Group>>       m_groups;

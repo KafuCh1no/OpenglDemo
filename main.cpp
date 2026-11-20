@@ -15,6 +15,7 @@
 #include "CScene.h"
 #include "CTexture.h"
 #include "CHDR.h"
+#include "CVolumetricFog.h"
 #include "SceneSetup.h"
 
 // ============ 全局场景（相机 / 几何 / 灯光 / 阴影 / 碰撞都在里面） ============
@@ -37,6 +38,9 @@ constexpr float kPlayerHeight = 1.85f;
 
 // 手电筒在光源列表里的下标
 constexpr int kFlashlightIndex = 1;
+
+// 月光（平行光）在光源列表里的下标：体积雾用它做光柱
+constexpr int kMoonlightIndex = 3;
 
 // ============ 回调 ============
 void framebufferSizeCallback(GLFWwindow*, int w, int h)
@@ -147,6 +151,7 @@ int main()
 	int initW = 1800, initH = 1000;
 	glfwGetFramebufferSize(window, &initW, &initH);
 	CHDR hdr(initW, initH);
+	CVolumetricFog fog(initW, initH);
 
 	while (!glfwWindowShouldClose(window))
 	{
@@ -164,21 +169,48 @@ int main()
 		int fbw = 0, fbh = 0;
 		glfwGetFramebufferSize(window, &fbw, &fbh);
 		hdr.Resize(fbw, fbh);
-
-		// HDR Pass：场景画进浮点缓冲，> 1.0 的亮度不被切掉
-		hdr.Begin();
-		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+		fog.Resize(fbw, fbh);
 
 		glm::mat4 projection = glm::perspective(glm::radians(60.0f),
 			(float)fbw / (float)fbh, 0.1f, 100.0f);
 
-		// 阴影 Pass + 灯光 uniform + 按材质绘制，全在场景内部完成
-		gScene.Render(shader, projection);
-		hdr.End();
+		if (hdr.enabled)
+		{
+			// HDR Pass：场景画进浮点缓冲，> 1.0 的亮度不被切掉
+			hdr.Begin();
+			glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-		//  色调映射
-		hdr.Present();
+			// 阴影 Pass + 灯光 uniform + 按材质绘制，全在场景内部完成
+			gScene.Render(shader, projection, true);
+			hdr.End();
+
+			// 体积雾：必须排在主 Pass 之后，要读深度纹理和月光的阴影图
+			unsigned int fogTex = 0;
+			if (fog.enabled && fog.IsValid())
+			{
+				const glm::mat4 invViewProj = glm::inverse(projection * gScene.GetView());
+				const CLight&   moon        = gScene.Lights()[kMoonlightIndex];
+
+				fog.Render(hdr.GetDepthTexture(), invViewProj, gScene.cameraPos,
+					gScene.GetShadowMapTexture(kMoonlightIndex),
+					gScene.GetLightSpaceMatrix(kMoonlightIndex),
+					moon.direction, moon.color,
+					moon.enabled ? moon.intensity : 0.0f);
+
+				fogTex = fog.GetTexture();
+			}
+
+			// 色调映射：全屏三角写回默认帧缓冲（必须在 ImGui 之前）
+			hdr.Present(fogTex);
+		}
+		else
+		{
+			// LDR 直出
+			glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+			gScene.Render(shader, projection, false);
+		}
 
 		// ================= ImGui =================
 		ImGui_ImplOpenGL3_NewFrame();
@@ -191,9 +223,35 @@ int main()
 		ImGui::Text("FPS %.1f", ImGui::GetIO().Framerate);
 		ImGui::Separator();
 
-		// HDR / 色调映射：勾掉就是直通，画面和改造前一致，方便对比
-		ImGui::Checkbox("tone mapping", &hdr.toneMapping);
-		ImGui::SliderFloat("exposure", &hdr.exposure, 0.1f, 5.0f);
+		// HDR 总开关：关掉后完全绕过浮点缓冲，等同加 HDR 之前的渲染
+		ImGui::Checkbox("HDR", &hdr.enabled);
+		if (hdr.enabled)
+		{
+			ImGui::SameLine();
+			ImGui::Checkbox("tone mapping", &hdr.toneMapping);
+			ImGui::SliderFloat("exposure", &hdr.exposure, 0.1f, 5.0f);
+		}
+		else
+		{
+			ImGui::SameLine();
+			ImGui::TextDisabled("(LDR 直出，8 bit)");
+		}
+		ImGui::Separator();
+
+		// 体积雾（平行光，月光穿过窗洞形成光柱）
+		ImGui::Checkbox("volumetric fog", &fog.enabled);
+		if (fog.enabled)
+		{
+			if (!hdr.enabled)
+			{
+				ImGui::SameLine();
+				ImGui::TextDisabled("(需要 HDR 开启)");
+			}
+			ImGui::SliderFloat("fog density",  &fog.densityBase,   0.0f, 0.30f);
+			ImGui::SliderFloat("fog falloff",  &fog.heightFalloff, 0.0f, 2.0f);
+			ImGui::SliderFloat("fog distance", &fog.maxDistance,   5.0f, 60.0f);
+			ImGui::SliderFloat("fog phase",    &fog.phaseG,       -0.9f, 0.95f);
+		}
 		ImGui::Separator();
 
 		auto& lights = gScene.Lights();

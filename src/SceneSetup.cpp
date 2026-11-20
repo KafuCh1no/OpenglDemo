@@ -459,11 +459,13 @@ void SetupScene(CScene& scene)
 	CLight moonlight;
 	moonlight.type       = 2;
 	moonlight.color      = glm::vec3(0.55f, 0.68f, 1.0f);  // 月光冷蓝
-	moonlight.intensity  = 0.6f;
-	moonlight.direction  = glm::normalize(glm::vec3(1.0f, 0.0f, 0.0f));
-	moonlight.position   = glm::vec3(-24.4f, 2.0f, -3.0f);
-	// 正交盒半宽
-	moonlight.range      = 11.0f;
+	moonlight.intensity  = 2.0f;
+	// 从西侧上方斜射（45°），穿过西墙的窗洞落到地面
+	moonlight.direction  = glm::normalize(glm::vec3(1.0f, -1.0f, 0.0f));
+	// 沿 direction 反方向退到场景外，保证整栋房子落在正交相机的 [near, far] 内
+	moonlight.position   = glm::vec3(-24.4f, 14.9f, -3.0f);
+	// 正交盒半宽：相机右方向是 +Z，房子 z 跨度 26 米，半宽必须 ≥ 13
+	moonlight.range      = 20.0f;
 	moonlight.castShadow = true;
 	scene.AddLight(moonlight);
 

@@ -7,22 +7,43 @@ in vec2 vUV;
 uniform sampler2D hdrBuffer;
 
 uniform float exposure;
-// false = 直通（画面与改造前一致）；true = Reinhard 压缩
 uniform bool  uToneMapping;
+
+// 体积雾：rgb = 散射光，a = 透射率
+uniform sampler2D fogBuffer;
+uniform bool      uHasFog;
+
+vec3 ACES(vec3 x);
 
 void main()
 {
     vec3 hdr = texture(hdrBuffer, vUV).rgb;
 
+    // 体积雾合成：先按透射率衰减，再叠加散射光
+    // 必须在线性空间、色调映射之前做
+    if (uHasFog)
+    {
+        vec4 fog = texture(fogBuffer, vUV);
+        hdr = hdr * fog.a + fog.rgb;
+    }
+
     vec3 color = hdr;
     if (uToneMapping)
     {
-        // Reinhard：x / (1 + x)，把 [0, inf) 单调压进 [0, 1)
-        // 单调很关键 —— 亮度顺序不变，只是把超出 1.0 的部分拉开层次
         vec3 x = hdr * exposure;
-        color = x / (x + vec3(1.0));
+        color = ACES(x);
     }
 
     // 线性 -> sRGB 编码，gamma矫正
     FragColor = vec4(pow(color, vec3(1.0 / 2.2)), 1.0);
+}
+
+vec3 ACES(vec3 x)
+{
+    const float a = 2.51;
+    const float b = 0.03;
+    const float c = 2.43;
+    const float d = 0.59;
+    const float e = 0.14;
+    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }

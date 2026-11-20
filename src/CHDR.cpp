@@ -26,8 +26,7 @@ void CHDR::CreateFBO()
 {
 	glGenFramebuffers(1, &m_fbo);
 	glGenTextures(1, &m_colorTex);
-	// 自定义 FBO 不会自带深度缓冲，不挂会导致深度测试失效
-	glGenRenderbuffers(1, &m_depthRbo);
+	glGenTextures(1, &m_depthTex);
 
 	// 颜色附件：16 位浮点。用 RGBA 而不是 RGB —— RGB16F 在部分驱动上不可作为渲染目标
 	glBindTexture(GL_TEXTURE_2D, m_colorTex);
@@ -40,14 +39,21 @@ void CHDR::CreateFBO()
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glBindTexture(GL_TEXTURE_2D, 0);
 
-	// 深度附件：只在 pass 内用，不需要采样，renderbuffer 比纹理省
-	glBindRenderbuffer(GL_RENDERBUFFER, m_depthRbo);
-	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, m_width, m_height);
-	glBindRenderbuffer(GL_RENDERBUFFER, 0);
+	// 深度附件：用纹理而不是 renderbuffer
+	// 体积雾 / SSAO / 景深都要读它还原世界坐标，renderbuffer 取样不了
+	// NEAREST 是必须的：插值出来的深度不对应任何真实表面
+	glBindTexture(GL_TEXTURE_2D, m_depthTex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, m_width, m_height, 0,
+		GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glBindTexture(GL_TEXTURE_2D, 0);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_colorTex, 0);
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, m_depthRbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,  GL_TEXTURE_2D, m_depthTex, 0);
 
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
 		std::cout << "[CHDR] FBO incomplete!\n";
@@ -57,11 +63,11 @@ void CHDR::CreateFBO()
 
 void CHDR::DestroyFBO()
 {
-	if (m_depthRbo) glDeleteRenderbuffers(1, &m_depthRbo);
+	if (m_depthTex) glDeleteTextures(1, &m_depthTex);
 	if (m_colorTex) glDeleteTextures(1, &m_colorTex);
 	if (m_fbo)      glDeleteFramebuffers(1, &m_fbo);
 
-	m_depthRbo = m_colorTex = m_fbo = 0;
+	m_depthTex = m_colorTex = m_fbo = 0;
 }
 
 // 窗口尺寸变化时重建纹理
@@ -79,9 +85,10 @@ void CHDR::Resize(int width, int height)
 		GL_RGBA, GL_FLOAT, nullptr);
 	glBindTexture(GL_TEXTURE_2D, 0);
 
-	glBindRenderbuffer(GL_RENDERBUFFER, m_depthRbo);
-	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, m_width, m_height);
-	glBindRenderbuffer(GL_RENDERBUFFER, 0);
+	glBindTexture(GL_TEXTURE_2D, m_depthTex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, m_width, m_height, 0,
+		GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+	glBindTexture(GL_TEXTURE_2D, 0);
 }
 
 void CHDR::Begin()
@@ -99,7 +106,7 @@ void CHDR::End()
 }
 
 // 色调映射
-void CHDR::Present()
+void CHDR::Present(unsigned int fogTex)
 {
 	// 全屏三角：不参与深度测试、不剔除、不混合
 	glDisable(GL_DEPTH_TEST);
@@ -113,6 +120,15 @@ void CHDR::Present()
 
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, m_colorTex);
+
+	// 体积雾：rgba = (散射光, 透射率)
+	m_tonemapShader.setBool("uHasFog", fogTex != 0);
+	if (fogTex)
+	{
+		glActiveTexture(GL_TEXTURE1);
+		glBindTexture(GL_TEXTURE_2D, fogTex);
+		m_tonemapShader.setInt("fogBuffer", 1);
+	}
 
 	glBindVertexArray(m_quadVao);
 	glDrawArrays(GL_TRIANGLES, 0, 3);
