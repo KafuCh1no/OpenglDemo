@@ -85,6 +85,10 @@ void CShadowCube::Render(const std::vector<CShadow::DrawItem>& items,
 	GLint vp[4];
 	glGetIntegerv(GL_VIEWPORT, vp);
 
+	// 恢复绘制目标而不是硬绑 0：上层可能正在 HDR 离屏缓冲里渲染
+	GLint prevFbo = 0;
+	glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFbo);
+
 	glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
 	glViewport(0, 0, m_size, m_size);
 
@@ -115,6 +119,6 @@ void CShadowCube::Render(const std::vector<CShadow::DrawItem>& items,
 		}
 	}
 
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glBindFramebuffer(GL_FRAMEBUFFER, prevFbo);
 	glViewport(vp[0], vp[1], vp[2], vp[3]);
 }

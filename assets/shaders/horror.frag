@@ -172,13 +172,26 @@ void main()
     float fog = 1.0 - exp(-0.045 * length(viewPos - WorldPos));
     result = mix(result, vec3(0.0), fog);
 
-    // 线性 -> sRGB 编码（配合纹理的 GL_SRGB8_ALPHA8 解码）
-    FragColor = vec4(pow(result, vec3(1.0 / 2.2)), 1.0);
+    // 直接输出线性值：sRGB 编码移到 tonemap pass
+    // 这样 > 1.0 的高光能完整存进 GL_RGBA16F，不会被 8 bit 硬切成白色
+    FragColor = vec4(result, 1.0);
+}
+
+// 黄金角螺旋（Vogel 分布）：单位圆内第 i 个采样点（共 n 个）
+//   r = sqrt((i + 0.5) / n)   → 按面积均匀，避免中心挤、外圈空
+//   θ = i × 137.5077°         → 无理数角度，不形成径向条带
+vec2 goldenDisk(int i, int n)
+{
+    float fi = float(i);
+    float r  = sqrt((fi + 0.5) / float(n));
+    float th = fi * 2.39996323;          // 黄金角（弧度）
+    return vec2(r * cos(th), r * sin(th));
 }
 
 // 聚光、平行光阴影计算
 // uShadowMode = 0：单点采样（硬边，最快）
-// uShadowMode = 1：PCF 3x3（9 次采样，边缘 3 texel 过渡）
+// uShadowMode = 1：PCF 3x3（9 次采样，边缘固定 3 texel 过渡）
+// uShadowMode = 2：PCSS（32 次采样，半影宽度随遮挡距离变化）
 float ShadowCalculation(vec4 fragPosLightSpace, sampler2D shadowMap)
 {
     vec3 proj = fragPosLightSpace.xyz / fragPosLightSpace.w;
@@ -192,6 +205,7 @@ float ShadowCalculation(vec4 fragPosLightSpace, sampler2D shadowMap)
 
     float currentDepth = proj.z;
     float bias         = 0.0001;
+    vec2  texelSize    = 1.0 / vec2(textureSize(shadowMap, 0));
 
     // 单点采样
     if (uShadowMode == 0)
@@ -200,9 +214,53 @@ float ShadowCalculation(vec4 fragPosLightSpace, sampler2D shadowMap)
         return (currentDepth - bias > closestDepth) ? 1.0 : 0.0;
     }
 
+    // PCSS
+    if (uShadowMode == 2)
+    {
+        // 采样数
+        const int   kSamples      = 16;
+        // blocker search 半径
+        const float kSearchTexels = 4.0;
+        // 等效光源尺寸
+        const float kLightSize    = 0.10;
+        // 半影核上限
+        const float kMaxRadius    = 6.0;
+
+        // blocker search
+        float blockerSum   = 0.0;
+        int   blockerCount = 0;
+        for (int i = 0; i < kSamples; ++i)
+        {
+            vec2  off = goldenDisk(i, kSamples) * texelSize * kSearchTexels;
+            float d   = texture(shadowMap, proj.xy + off).r;
+            if (d < currentDepth - bias)
+            {
+                blockerSum += d;
+                blockerCount++;
+            }
+        }
+        if (blockerCount == 0) return 0.0;
+
+        // 采样点被遮盖平均深度
+        float avgBlocker = blockerSum / float(blockerCount);
+        // 相似三角形比例
+        float penumbra   = (currentDepth - avgBlocker) / max(avgBlocker, 1e-5) * kLightSize;
+        // PCF循环的范围，相当于光源有多大
+        float radius     = clamp(penumbra / texelSize.x, 1.0, kMaxRadius);
+
+        // 可变半径的PCF
+        float shadow = 0.0;
+        for (int i = 0; i < kSamples; ++i)
+        {
+            vec2  off = goldenDisk(i, kSamples) * texelSize * radius;
+            float d   = texture(shadowMap, proj.xy + off).r;
+            shadow += (d < currentDepth - bias) ? 1.0 : 0.0;
+        }
+        return shadow / float(kSamples);
+    }
+
     // PCF 3x3
-    vec2  texelSize = 1.0 / vec2(textureSize(shadowMap, 0));
-    float shadow    = 0.0;
+    float shadow = 0.0;
     for (int x = -1; x <= 1; ++x)
     {
         for (int y = -1; y <= 1; ++y)

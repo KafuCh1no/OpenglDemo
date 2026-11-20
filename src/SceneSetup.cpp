@@ -446,8 +446,8 @@ void SetupScene(CScene& scene)
 	CLight bathroom;
 	bathroom.type           = 1;
 	bathroom.intensity      = 10.0f;
-	bathroom.position       = glm::vec3(-4.0f, 3.0f, -13.0f);
-	bathroom.direction      = glm::normalize(glm::vec3(0.0f, -0.3f, 1.0f));
+	bathroom.position       = glm::vec3(1.0f, 1.0f, 1.90f);
+	bathroom.direction      = glm::normalize(glm::vec3(0.0f, 0.0f, 1.0f));
 	bathroom.cutoffDeg      = 14.0f;
 	bathroom.outerCutoffDeg = 30.0f;
 	bathroom.castShadow     = true;

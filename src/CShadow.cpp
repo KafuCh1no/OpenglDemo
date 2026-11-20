@@ -86,6 +86,11 @@ void CShadow::Render(const std::vector<DrawItem>& items,
 	GLint vp[4];
 	glGetIntegerv(GL_VIEWPORT, vp);
 
+	// 绘制目标同样要恢复：调用方可能已绑了离屏 FBO（HDR Pass），
+	// 硬绑回 0 会让随后的主 pass 画到窗口上
+	GLint prevFbo = 0;
+	glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFbo);
+
 	glEnable(GL_CULL_FACE);
 	glCullFace(GL_FRONT);
 	glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
@@ -105,6 +110,6 @@ void CShadow::Render(const std::vector<DrawItem>& items,
 	glCullFace(GL_BACK);
 	glDisable(GL_CULL_FACE);
 
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glBindFramebuffer(GL_FRAMEBUFFER, prevFbo);
 	glViewport(vp[0], vp[1], vp[2], vp[3]);
 }

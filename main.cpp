@@ -14,6 +14,7 @@
 #include "CShader.h"
 #include "CScene.h"
 #include "CTexture.h"
+#include "CHDR.h"
 #include "SceneSetup.h"
 
 // ============ 全局场景（相机 / 几何 / 灯光 / 阴影 / 碰撞都在里面） ============
@@ -142,6 +143,11 @@ int main()
 
 	CShader shader("assets/shaders/horror.vert", "assets/shaders/horror.frag");
 
+	// HDR 离屏缓冲：场景先画进浮点纹理，再经色调映射输出到窗口
+	int initW = 1800, initH = 1000;
+	glfwGetFramebufferSize(window, &initW, &initH);
+	CHDR hdr(initW, initH);
+
 	while (!glfwWindowShouldClose(window))
 	{
 		float curFrame = (float)glfwGetTime();
@@ -155,16 +161,24 @@ int main()
 		if (glfwGetKey(window, GLFW_KEY_G) == GLFW_PRESS) flashlightOn = false;
 		gScene.Lights()[kFlashlightIndex].enabled = flashlightOn;
 
+		int fbw = 0, fbh = 0;
+		glfwGetFramebufferSize(window, &fbw, &fbh);
+		hdr.Resize(fbw, fbh);
+
+		// HDR Pass：场景画进浮点缓冲，> 1.0 的亮度不被切掉
+		hdr.Begin();
 		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-		int fbw = 0, fbh = 0;
-		glfwGetFramebufferSize(window, &fbw, &fbh);
 		glm::mat4 projection = glm::perspective(glm::radians(60.0f),
 			(float)fbw / (float)fbh, 0.1f, 100.0f);
 
 		// 阴影 Pass + 灯光 uniform + 按材质绘制，全在场景内部完成
 		gScene.Render(shader, projection);
+		hdr.End();
+
+		//  色调映射
+		hdr.Present();
 
 		// ================= ImGui =================
 		ImGui_ImplOpenGL3_NewFrame();
@@ -175,6 +189,11 @@ int main()
 		ImGui::SetNextWindowPos(ImVec2(12, 12), ImGuiCond_FirstUseEver);
 		ImGui::Begin("ImGui");
 		ImGui::Text("FPS %.1f", ImGui::GetIO().Framerate);
+		ImGui::Separator();
+
+		// HDR / 色调映射：勾掉就是直通，画面和改造前一致，方便对比
+		ImGui::Checkbox("tone mapping", &hdr.toneMapping);
+		ImGui::SliderFloat("exposure", &hdr.exposure, 0.1f, 5.0f);
 		ImGui::Separator();
 
 		auto& lights = gScene.Lights();
@@ -208,8 +227,8 @@ int main()
 
 		ImGui::Separator();
 		int shadowMode = gScene.ShadowMode();
-		const char* kShadowModes[] = { "single tap", "PCF 3x3" };
-		if (ImGui::Combo("shadow filter", &shadowMode, kShadowModes, 2))
+		const char* kShadowModes[] = { "single tap", "PCF 3x3", "PCSS" };
+		if (ImGui::Combo("shadow filter", &shadowMode, kShadowModes, 3))
 			gScene.SetShadowMode(shadowMode);
 
 		ImGui::Separator();
