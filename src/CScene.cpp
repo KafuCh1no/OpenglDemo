@@ -263,26 +263,46 @@ glm::mat4 CScene::GetLightSpaceMatrix(int lightIndex) const
 	return m_shadowPasses[lightIndex]->GetLightSpace();
 }
 
-void CScene::Render(CShader& shader, const glm::mat4& projection, bool hdr)
+void CScene::UpdateFollowLights(float dt)
 {
 	const glm::vec3 front = GetFront();
+	const glm::vec3 right = GetRight();
+	const glm::vec3 up    = glm::cross(right, front);
 
-	// 手电筒：位置跟着相机，可以带一个相机空间偏移（模拟手持在身体右侧）
+	// 朝向指数平滑系数：dt 越大追得越多；速度越大越"硬"
+	const float kDir = 1.0f - std::exp(-followDirSpeed * dt);
+
+	for (CLight& l : m_lights)
 	{
-		const glm::vec3 right = GetRight();
-		const glm::vec3 up    = glm::cross(right, front);
-		for (CLight& l : m_lights)
+		if (!l.followCamera) continue;
+
+		// 手持位置：相机位置 + 相机空间偏移（右/上/前）
+		// 位置不做滞后，前后走动时光源立刻跟上，避免光斑前后飘
+		const glm::vec3 targetPos = cameraPos
+			+ right * l.followOffset.x
+			+ up    * l.followOffset.y
+			+ front * l.followOffset.z;
+
+		if (!m_followInit)
 		{
-			if (l.followCamera)
-			{
-				l.position  = cameraPos
-					+ right * l.followOffset.x
-					+ up    * l.followOffset.y
-					+ front * l.followOffset.z;
-				l.direction = front;
-			}
+			// 第一帧直接对齐，避免从原点飞过来
+			m_followDir  = front;
+			m_followInit = true;
 		}
+		else
+		{
+			// 只有朝向滞后：转视角时手电筒会"甩"过去一点才追上
+			m_followDir = glm::normalize(glm::mix(m_followDir, front, kDir));
+		}
+
+		l.position  = targetPos;
+		l.direction = m_followDir;
 	}
+}
+
+void CScene::BuildShadowMaps()
+{
+	const glm::vec3 front = GetFront();
 
 	const int lightCount = (int)m_lights.size();
 
@@ -306,8 +326,8 @@ void CScene::Render(CShader& shader, const glm::mat4& projection, bool hdr)
 	constexpr float SHADOW_FAR = 50.0f;
 	constexpr float POINT_FAR  = 30.0f;
 
-	std::vector<glm::mat4> shadowMats(lightCount, glm::mat4(1.0f));
-	std::vector<float>     pointFar(lightCount, POINT_FAR);
+	m_shadowMats.assign(lightCount, glm::mat4(1.0f));
+	m_pointFar.assign(lightCount, POINT_FAR);
 
 	for (int i = 0; i < lightCount; ++i)
 	{
@@ -319,7 +339,7 @@ void CScene::Render(CShader& shader, const glm::mat4& projection, bool hdr)
 			// 聚光灯
 			m_shadowPasses[i]->Render(shadowItems, l.position, l.direction,
 				l.outerCutoffDeg, 0.1f, SHADOW_FAR);
-			shadowMats[i] = m_shadowPasses[i]->GetLightSpace();
+			m_shadowMats[i] = m_shadowPasses[i]->GetLightSpace();
 		}
 		else if (l.type == 0 && i < (int)m_cubePasses.size())
 		{
@@ -328,18 +348,30 @@ void CScene::Render(CShader& shader, const glm::mat4& projection, bool hdr)
 				m_cubePasses[i] = std::make_unique<CShadowCube>(2048);
 
 			m_cubePasses[i]->Render(shadowItems, l.position, 0.1f, POINT_FAR);
-			pointFar[i] = m_cubePasses[i]->GetFarPlane();
+			m_pointFar[i] = m_cubePasses[i]->GetFarPlane();
 		}
 		else if (l.type == 2 && i < (int)m_shadowPasses.size())
 		{
 			// 平行光：用 range 当正交盒半宽
 			m_shadowPasses[i]->Render(shadowItems, l.position, l.direction,
 				0.0f, 0.1f, SHADOW_FAR, l.range);
-			shadowMats[i] = m_shadowPasses[i]->GetLightSpace();
+			m_shadowMats[i] = m_shadowPasses[i]->GetLightSpace();
 		}
 	}
+}
 
-	// 把结构体数组拆绳多个属性数组
+void CScene::UploadCamera(CShader& shader, const glm::mat4& projection)
+{
+	shader.setMat4("projection", projection);
+	shader.setMat4("view", GetView());
+	shader.setVec3("viewPos", cameraPos);
+}
+
+void CScene::UploadLights(CShader& shader)
+{
+	const int lightCount = (int)m_lights.size();
+
+	// 把结构体数组拆成多个属性数组
 	std::vector<glm::vec3> lPos, lDir, lColor;
 	std::vector<float>     lIntensity, lCutoff, lOuter;
 	std::vector<int>       lType;
@@ -357,17 +389,13 @@ void CScene::Render(CShader& shader, const glm::mat4& projection, bool hdr)
 		lPos.push_back(l.position);
 		lDir.push_back(l.direction);
 		lColor.push_back(l.color);
-		lIntensity.push_back(l.enabled ? l.intensity : 0.0f);
+		// 平行光额外乘上闪电倍率（月光打闪），其他灯不受影响
+		const float flash = (l.type == 2) ? directionalFlash : 1.0f;
+		lIntensity.push_back(l.enabled ? l.intensity * flash : 0.0f);
 		lCutoff.push_back(glm::cos(glm::radians(l.cutoffDeg)));
 		lOuter.push_back(glm::cos(glm::radians(l.outerCutoffDeg)));
 		lType.push_back(l.type);
 	}
-
-	// 设置uniform数值
-	shader.use();
-	shader.setMat4("projection", projection);
-	shader.setMat4("view", GetView());
-	shader.setVec3("viewPos", cameraPos);
 
 	shader.setInt("lightCount", lightCount);
 	shader.setVec3Array("lightPos[0]",          lPos.data(),     lightCount);
@@ -377,14 +405,16 @@ void CScene::Render(CShader& shader, const glm::mat4& projection, bool hdr)
 	shader.setFloatArray("lightCutoff[0]",      lCutoff.data(),  lightCount);
 	shader.setFloatArray("lightOuterCutoff[0]", lOuter.data(),   lightCount);
 	shader.setIntArray("lightType[0]",          lType.data(),    lightCount);
-	shader.setMat4Array("lightSpaceMatrices[0]", shadowMats.data(), lightCount);
-	shader.setFloatArray("pointFarPlane[0]",    pointFar.data(), lightCount);
+	shader.setMat4Array("lightSpaceMatrices[0]", m_shadowMats.data(), lightCount);
+	shader.setFloatArray("pointFarPlane[0]",     m_pointFar.data(),   lightCount);
 
 	// 阴影采样模式（ImGui 可切换）
 	shader.setInt("uShadowMode", m_shadowMode);
+}
 
-	// HDR 模式由主循环决定：false 时 shader 自己编码，不经过浮点缓冲
-	shader.setBool("uHDR", hdr);
+void CScene::BindShadowMaps(CShader& shader)
+{
+	const int lightCount = (int)m_lights.size();
 
 	// 绑定阴影贴图
 	// 0壁炉 1手电筒 2洗手间灯 3月光
@@ -410,10 +440,18 @@ void CScene::Render(CShader& shader, const glm::mat4& projection, bool hdr)
 			shader.setInt("shadowCube" + std::to_string(i), unit);
 		}
 	}
+}
+
+void CScene::DrawGroups(CShader& shader, bool hdr)
+{
+	// HDR 模式由主循环决定：false 时 shader 自己编码，不经过浮点缓冲
+	// G-buffer 的材质 shader 没有这个 uniform，设了也是无害的空操作
+	shader.setBool("uHDR", hdr);
 
 	// 按材质分组绘制
 	for (auto& g : m_groups)
 	{
+		if (!g->visible) continue;
 		if (!g->mesh) continue;
 
 		const CMaterial& mat = g->material;
@@ -442,6 +480,9 @@ void CScene::Render(CShader& shader, const glm::mat4& projection, bool hdr)
 		}
 		shader.setVec3("tint", mat.tint);
 		shader.setFloat("uScale", mat.uScale);
+		// PBR 材质参数（前向 shader 没有这两个 uniform，设了是无害空操作）
+		shader.setFloat("uMetallic",  mat.metallic);
+		shader.setFloat("uRoughness", mat.roughness);
 
 		// 每组的模型矩阵 + UV 模式（墙面用世界 UV，模型用自带 UV）
 		shader.setMat4("model", ComposeTransform(g->modelPos, g->modelRotDeg, g->modelScale));
@@ -449,4 +490,58 @@ void CScene::Render(CShader& shader, const glm::mat4& projection, bool hdr)
 
 		g->mesh->Draw();
 	}
+}
+
+void CScene::Render(CShader& shader, const glm::mat4& projection, bool hdr)
+{
+	BuildShadowMaps();
+
+	shader.use();
+	UploadCamera(shader, projection);
+	UploadLights(shader);
+	BindShadowMaps(shader);
+
+	DrawGroups(shader, hdr);
+}
+
+void CScene::RenderToGBuffer(CShader& shader, const glm::mat4& projection)
+{
+	// 阴影图只在这里生成一次，之后的延迟光照 Pass 直接复用
+	BuildShadowMaps();
+
+	shader.use();
+	UploadCamera(shader, projection);
+
+	DrawGroups(shader, true);
+}
+
+void CScene::SetupDeferredLighting(CShader& shader, const glm::mat4& projection)
+{
+	shader.use();
+	UploadCamera(shader, projection);
+	UploadLights(shader);
+	BindShadowMaps(shader);
+}
+
+void CScene::RenderGeometryTo(CShader& shader, const glm::mat4& view,
+	const glm::mat4& projection)
+{
+	// 阴影图沿用本帧主 Pass 的，这里只换相机
+	shader.use();
+	shader.setMat4("projection", projection);
+	shader.setMat4("view", view);
+	shader.setVec3("viewPos", cameraPos);
+
+	DrawGroups(shader, true);
+}
+
+void CScene::SetupDeferredLightingFor(CShader& shader, const glm::mat4& view,
+	const glm::mat4& projection)
+{
+	shader.use();
+	shader.setMat4("projection", projection);
+	shader.setMat4("view", view);
+
+	UploadLights(shader);
+	BindShadowMaps(shader);
 }

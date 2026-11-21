@@ -6,7 +6,8 @@
 #include <iostream>
 
 CVolumetricFog::CVolumetricFog(int width, int height)
-	: m_shader("assets/shaders/volumetric.vert", "assets/shaders/volumetric.frag")
+	: m_shader("assets/shaders/volumetric.vert", "assets/shaders/volumetric.frag"),
+	  m_blurShader("assets/shaders/volumetric.vert", "assets/shaders/fogblur.frag")
 {
 	glGenVertexArrays(1, &m_quadVao);
 
@@ -45,15 +46,36 @@ void CVolumetricFog::CreateFBO()
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
 		std::cout << "[CVolumetricFog] FBO incomplete!\n";
 
+	// 模糊用的中间目标（和雾同尺寸）
+	glGenFramebuffers(1, &m_blurFbo);
+	glGenTextures(1, &m_blurTex);
+
+	glBindTexture(GL_TEXTURE_2D, m_blurTex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, m_width, m_height, 0,
+		GL_RGBA, GL_FLOAT, nullptr);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glBindTexture(GL_TEXTURE_2D, 0);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, m_blurFbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_blurTex, 0);
+
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+		std::cout << "[CVolumetricFog] blur FBO incomplete!\n";
+
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 void CVolumetricFog::DestroyFBO()
 {
-	if (m_fogTex) glDeleteTextures(1, &m_fogTex);
-	if (m_fbo)    glDeleteFramebuffers(1, &m_fbo);
+	if (m_fogTex)  glDeleteTextures(1, &m_fogTex);
+	if (m_fbo)     glDeleteFramebuffers(1, &m_fbo);
+	if (m_blurTex) glDeleteTextures(1, &m_blurTex);
+	if (m_blurFbo) glDeleteFramebuffers(1, &m_blurFbo);
 
-	m_fogTex = m_fbo = 0;
+	m_fogTex = m_fbo = m_blurTex = m_blurFbo = 0;
 }
 
 void CVolumetricFog::Resize(int width, int height)
@@ -70,6 +92,11 @@ void CVolumetricFog::Resize(int width, int height)
 	glBindTexture(GL_TEXTURE_2D, m_fogTex);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, m_width, m_height, 0,
 		GL_RGBA, GL_FLOAT, nullptr);
+
+	glBindTexture(GL_TEXTURE_2D, m_blurTex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, m_width, m_height, 0,
+		GL_RGBA, GL_FLOAT, nullptr);
+
 	glBindTexture(GL_TEXTURE_2D, 0);
 }
 
@@ -127,8 +154,27 @@ void CVolumetricFog::Render(unsigned int depthTex,
 	m_shader.setFloat("maxDistance", maxDistance);
 	m_shader.setFloat("phaseG", phaseG);
 
+
 	glBindVertexArray(m_quadVao);
 	glDrawArrays(GL_TRIANGLES, 0, 3);
+
+	// 分离式高斯模糊：先水平写到 m_blurTex，再垂直写回 m_fogTex
+	m_blurShader.use();
+	m_blurShader.setInt("uSource", 0);
+	m_blurShader.setVec2("uTexel", glm::vec2(1.0f / (float)m_width, 1.0f / (float)m_height));
+
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, m_fogTex);
+	glBindFramebuffer(GL_FRAMEBUFFER, m_blurFbo);
+	glViewport(0, 0, m_width, m_height);
+	m_blurShader.setVec2("uDir", glm::vec2(1.0f, 0.0f));
+	glDrawArrays(GL_TRIANGLES, 0, 3);
+
+	glBindTexture(GL_TEXTURE_2D, m_blurTex);
+	glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
+	m_blurShader.setVec2("uDir", glm::vec2(0.0f, 1.0f));
+	glDrawArrays(GL_TRIANGLES, 0, 3);
+
 	glBindVertexArray(0);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, prevFbo);

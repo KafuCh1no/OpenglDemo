@@ -26,6 +26,51 @@ std::vector<ModelHandle>& SceneModels()
 	return g_models;
 }
 
+glm::vec3 CandleFlamePosition()
+{
+	for (const ModelHandle& m : g_models)
+	{
+		if (m.name == "Candle" && m.group)
+		{
+			// candle.obj 局部高度 0.281（+Z 朝上），绕 X 转 -90 后变成 +Y
+			return m.group->modelPos +
+				glm::vec3(0.0f, 0.27f * m.group->modelScale.y, 0.0f);
+		}
+	}
+	return glm::vec3(0.0f);
+}
+
+CScene::Group* BathroomMirrorGroup()
+{
+	for (const ModelHandle& m : g_models)
+	{
+		if (m.name == "BathroomMirror" && m.group)
+			return m.group;
+	}
+	return nullptr;
+}
+
+MirrorSurface BathroomMirrorSurface()
+{
+	MirrorSurface s;
+	// mirror.obj 局部包围盒：x ±0.5247, y 0..0.8285, z ±0.0541（1.5 倍缩放、绕 Y 转 180°）
+	s.center     = glm::vec3(-4.4f, 2.487f, -14.860f);
+	s.normal     = glm::vec3(0.0f, 0.0f, 1.0f);
+	s.halfWidth  = 0.70f;
+	s.halfHeight = 0.54f;
+
+	if (CScene::Group* g = BathroomMirrorGroup())
+	{
+		// ImGui 里拖动过镜子就跟着走：镜心 = 模型位置 + 半个高度，玻璃面在模型 +Z 方向
+		const glm::vec3 p  = g->modelPos;
+		const glm::vec3 sc = g->modelScale;
+		s.center = glm::vec3(p.x, p.y + 0.4142f * sc.y, p.z + 0.0541f * sc.z);
+		s.halfWidth  = 0.70f * (sc.x / 1.5f);
+		s.halfHeight = 0.54f * (sc.y / 1.5f);
+	}
+	return s;
+}
+
 void SetupScene(CScene& scene)
 {
 	// ---- 纯色 ----
@@ -57,9 +102,8 @@ void SetupScene(CScene& scene)
 	scene.AddBox(gFloor, -10.0f, -0.5f, -16.0f, -5.75f, 0.0f, 0.0f, floorColor);
 	scene.AddBox(gFloor, -5.75f, -0.5f, -15.0f, -1.0f, 0.0f, -11.0f, floorColor);
 
-	scene.AddBox(gCeiling, -10.0f, 4.0f, -0.5f, 4.5f, 4.5f, 10.0f, ceilingColor);
-	scene.AddBox(gCeiling, -10.0f, 4.0f, -16.0f, -5.75f, 4.5f, 0.0f, ceilingColor);
-	scene.AddBox(gCeiling, -5.75f, 4.0f, -15.5f, -1.0f, 4.5f, -10.5f, ceilingColor);
+	scene.AddBox(gCeiling, -10.7f, 3.95f, -16.7f, 4.7f, 4.5f, 10.7f, ceilingColor);   // 整体外扩：盖住所有墙顶，并下沉 5cm 插进墙里，杜绝接缝漏光
+	scene.AddBox(gCeiling, -10.8f, 4.35f, -16.8f, 4.8f, 5.0f, 10.8f, ceilingColor);   // 第二层天花板：再高一截，和下面那块重叠 0.15 米
 
 	// ---- 厨房 / 餐厅墙 ----
 	// 南墙（在 x ∈ [0.279, 1.721]、y ∈ [0, 2.840] 处开门口，对应木门）
@@ -175,6 +219,9 @@ void SetupScene(CScene& scene)
 	CTexture& chairAlbedo  = Tex("assets/models/chair/Textures/Blender_2K/T_Chair_BaseColor.jpg");
 	CTexture& chairNormal  = Tex("assets/models/chair/Textures/Blender_2K/T_Chair_Normal.png", false);
 
+	CTexture& candleAlbedo = Tex("assets/models/the_bathroom_free/textures/Candle_baseColor.png");
+	CTexture& candleNormal = Tex("assets/models/the_bathroom_free/textures/Candle_normal.png", false);
+
 	CTexture& cabinetAlbedo = Tex("assets/models/gothic-cabinet/textures/GothicCabinet_01_diff_2k.jpg");
 	CTexture& cabinetNormal = Tex("assets/models/gothic-cabinet/textures/GothicCabinet_01_nor_gl_2k.jpg", false);
 
@@ -224,6 +271,17 @@ void SetupScene(CScene& scene)
 		glm::vec3(0.0f),
 		glm::vec3(0.065f),
 		{ &tableAlbedo, glm::vec3(1.0f), 1.0f, &tableNormal, 1.0f });
+
+	// 蜡烛
+	{
+		auto& gCandle = scene.AddModel("assets/models/the_bathroom_free/candle.obj",
+			glm::vec3(-1.5f, 1.22f, 6.0f),
+			glm::vec3(-90.0f, 120.0f, 0.0f),
+			glm::vec3(1.5f),
+			{ &candleAlbedo, glm::vec3(1.0f), 1.0f, &candleNormal, 1.0f },
+			false);
+		reg("Candle", gCandle);
+	}
 
 	// 椅子 x4
 	// 东南
@@ -416,17 +474,17 @@ void SetupScene(CScene& scene)
 
 	// ---- 灯光 ----
 	// 索引 = 阴影槽位，shader 里按 i 硬编码匹配，顺序不能随意调整
-	//   0 壁炉   点光   → shadowCube0
+	//   0 蜡烛光   点光   → shadowCube0
 	//   1 手电筒 聚光   → shadowMap1
 	//   2 洗手间 聚光   → shadowMap2
 	//   3 月光   平行光 → shadowMap3
 
-	// 0 号：壁炉（点光，cubemap 阴影）
+	// 0 号：蜡烛光（点光，cubemap 阴影）
 	CLight fireplace;
 	fireplace.type       = 0;
 	fireplace.color      = glm::vec3(1.0f, 0.55f, 0.25f);
-	fireplace.intensity  = 0.0f;
-	fireplace.position   = glm::vec3(2.50f, 0.70f, 0.90f);
+	fireplace.intensity  = 0.5f;
+	fireplace.position   = glm::vec3(-1.5f, 2.0f, 6.0f);
 	fireplace.castShadow = true;
 	scene.AddLight(fireplace);
 
@@ -435,21 +493,21 @@ void SetupScene(CScene& scene)
 	flashlight.type           = 1;
 	flashlight.color          = glm::vec3(1.0f);
 	flashlight.intensity      = 2.5f;
-	flashlight.cutoffDeg      = 10.0f;
+	flashlight.cutoffDeg      = 5.0f;
 	flashlight.outerCutoffDeg = 25.0f;
 	flashlight.castShadow     = true;
 	flashlight.followCamera   = true;
-	flashlight.followOffset   = glm::vec3(0.30f, -0.20f, 0.0f);   // 右手持：偏右 30 cm、略低于视线 20 cm
+	flashlight.followOffset   = glm::vec3(0.30f, -0.20f, 0.0f);
 	scene.AddLight(flashlight);
 
 	// 2 号：洗手间灯（聚光，固定）
 	CLight bathroom;
 	bathroom.type           = 1;
 	bathroom.intensity      = 10.0f;
-	bathroom.position       = glm::vec3(1.0f, 1.0f, 1.90f);
-	bathroom.direction      = glm::normalize(glm::vec3(0.0f, 0.0f, 1.0f));
+	bathroom.position       = glm::vec3(-4.0f, 4.0f, -14.0f);
+	bathroom.direction      = glm::normalize(glm::vec3(0.0f, -1.0f, 0.0f));
 	bathroom.cutoffDeg      = 14.0f;
-	bathroom.outerCutoffDeg = 30.0f;
+	bathroom.outerCutoffDeg = 60.0f;
 	bathroom.castShadow     = true;
 	scene.AddLight(bathroom);
 
@@ -459,7 +517,7 @@ void SetupScene(CScene& scene)
 	CLight moonlight;
 	moonlight.type       = 2;
 	moonlight.color      = glm::vec3(0.55f, 0.68f, 1.0f);  // 月光冷蓝
-	moonlight.intensity  = 2.0f;
+	moonlight.intensity  = 5.0f;
 	// 从西侧上方斜射（45°），穿过西墙的窗洞落到地面
 	moonlight.direction  = glm::normalize(glm::vec3(1.0f, -1.0f, 0.0f));
 	// 沿 direction 反方向退到场景外，保证整栋房子落在正交相机的 [near, far] 内

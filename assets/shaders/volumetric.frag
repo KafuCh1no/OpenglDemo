@@ -12,7 +12,7 @@ uniform mat4      lightSpace;
 uniform mat4 invViewProj;
 uniform vec3 cameraPos;
 
-// 平行光（月光）：只有方向，没有位置和距离衰减
+// 平行光
 uniform vec3  lightDir;
 uniform vec3  lightColor;
 uniform float lightIntensity;
@@ -24,7 +24,7 @@ uniform float fogBaseHeight;   // 从这个高度开始衰减
 uniform float maxDistance;     // 最远步进距离
 uniform float phaseG;          // 相函数 g
 
-const int   STEPS = 24;
+const int   STEPS = 32;
 const float PI    = 3.14159265;
 
 // Henyey-Greenstein 相函数：描述光朝观察方向散射多少
@@ -35,22 +35,28 @@ float HG(float cosTheta, float g)
     return (1.0 - g2) / (4.0 * PI * pow(1.0 + g2 - 2.0 * g * cosTheta, 1.5));
 }
 
-// 4x4 Bayer 抖动，打散步进产生的同心圆条带
-float bayer4(vec2 fragCoord)
+// 交错梯度噪声（IGN）：逐像素抖动，配合模糊 Pass 消除条带
+float ign(vec2 fragCoord)
 {
-    int x = int(mod(fragCoord.x, 4.0));
-    int y = int(mod(fragCoord.y, 4.0));
-    const float m[16] = float[16](
-         0.0,  8.0,  2.0, 10.0,
-        12.0,  4.0, 14.0,  6.0,
-         3.0, 11.0,  1.0,  9.0,
-        15.0,  7.0, 13.0,  5.0);
-    return (m[y * 4 + x] + 0.5) / 16.0;
+    return fract(52.9829189 * fract(dot(fragCoord, vec2(0.06711056, 0.00583715))));
+}
+
+// 4 抽样 PCF：单点采样会让步进跨越阴影边界时出现椒盐噪点
+float shadowFactor(vec3 proj, vec2 texel)
+{
+    const float bias = 0.0008;
+    vec2 o = texel * 0.75;
+    float lit = 0.0;
+    lit += (proj.z - bias > texture(shadowMap, proj.xy + vec2(-o.x, -o.y)).r) ? 0.0 : 1.0;
+    lit += (proj.z - bias > texture(shadowMap, proj.xy + vec2( o.x, -o.y)).r) ? 0.0 : 1.0;
+    lit += (proj.z - bias > texture(shadowMap, proj.xy + vec2(-o.x,  o.y)).r) ? 0.0 : 1.0;
+    lit += (proj.z - bias > texture(shadowMap, proj.xy + vec2( o.x,  o.y)).r) ? 0.0 : 1.0;
+    return lit * 0.25;
 }
 
 void main()
 {
-    // 用深度还原世界坐标：这就是"终点"，不求交
+    // 用深度还原世界坐标
     float depth = texture(gDepth, vUV).r;
     vec4  ndc   = vec4(vUV * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
     vec4  wp    = invViewProj * ndc;
@@ -65,7 +71,9 @@ void main()
     vec3  radiance = lightColor * lightIntensity;
     float phase    = HG(dot(rayDir, L), phaseG);
 
-    float jitter = bayer4(gl_FragCoord.xy);
+    // 逐像素抖动把步进条带打散成颗粒，之后由 CVolumetricFog 的模糊 Pass 磨平
+    float jitter = ign(gl_FragCoord.xy);
+    vec2  texel  = 1.0 / vec2(textureSize(shadowMap, 0));
 
     vec3  scattered = vec3(0.0);
     // 沿路径累积的“密度 × 距离”
@@ -91,8 +99,7 @@ void main()
         if (proj.x >= 0.0 && proj.x <= 1.0 &&
             proj.y >= 0.0 && proj.y <= 1.0 && proj.z <= 1.0)
         {
-            float closest = texture(shadowMap, proj.xy).r;
-            lit = (proj.z - 0.0005 > closest) ? 0.0 : 1.0;
+            lit = shadowFactor(proj, texel);
         }
         // 无论有没有光，雾都在吸收
         float sampleOptical = density * dt;

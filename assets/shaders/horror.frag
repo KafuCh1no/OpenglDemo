@@ -1,5 +1,6 @@
 #version 330 core
-out vec4 FragColor;
+layout (location = 0) out vec4 FragColor;
+layout (location = 1) out vec4 gNormal;   // 世界空间法线，给 SSAO
 
 in vec3 WorldPos;
 in vec3 Normal;
@@ -117,7 +118,7 @@ void main()
 
         if (lightType[i] == 2)
         {
-            // 平行光：只有方向，不使用 position，也不随距离衰减
+            // 平行光
             L = normalize(-lightDirArr[i]);
             atten = 1.0f;
         }
@@ -136,7 +137,11 @@ void main()
             {
                 float theta = dot(L, normalize(-lightDirArr[i]));
                 float eps   = max(lightCutoff[i] - lightOuterCutoff[i], 1e-4);
-                spot = clamp((theta - lightOuterCutoff[i]) / eps, 0.0, 1.0);
+                float x     = clamp((theta - lightOuterCutoff[i]) / eps, 0.0, 1.0);
+                // 中心亮圆、外圈渐暗：S 曲线让边缘平滑，再压一下外围亮度
+                spot = pow(x, 5.0);
+                spot *= 1.0 + 0.2 * smoothstep(0.94, 1.0, x);
+                atten = 1.0f;
             }
         }
 
@@ -179,6 +184,8 @@ void main()
     // 距离雾：按到眼睛的距离，远处融进黑暗
     float fog = 1.0 - exp(-0.045 * length(viewPos - WorldPos));
     result = mix(result, vec3(0.0), fog);
+
+    gNormal = vec4(normalize(Normal), 1.0);
 
     if (uHDR)
         FragColor = vec4(result, 1.0);

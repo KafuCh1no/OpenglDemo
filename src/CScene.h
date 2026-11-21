@@ -58,6 +58,7 @@ public:
 		glm::vec3                 modelScale{ 1.0f };   // 缩放
 		bool                      useWorldUV = true;    // true = 世界 UV（墙面），false = 模型自带 UV
 		bool                      castShadow = true;    // false = 不写入阴影图（玻璃等需要透光的面片）
+		bool                      visible    = true;    // false = 本帧不画（镜面反射 Pass 里临时藏掉镜子）
 		std::vector<float>        verts;
 		std::vector<unsigned int> indices;
 		std::unique_ptr<CMesh>    mesh;
@@ -113,6 +114,16 @@ public:
 	CLight& AddLight(const CLight& light);
 	std::vector<CLight>& Lights() { return m_lights; }
 
+	// 手电筒跟随相机的滞后：指数平滑速度，越大跟得越紧（越小越"软"）
+	float followDirSpeed = 10.0f;
+
+	// 平行光（月光）的临时亮度倍率：闪电打闪时由主循环写进来
+	float directionalFlash = 1.0f;
+
+	// 每帧鼠标转完视角后调用一次，dt 单位秒。
+	// 带 followCamera 的灯会平滑地追向目标位置/朝向，产生手持器械的延迟感。
+	void UpdateFollowLights(float dt);
+
 	// 阴影采样模式：0 = 单点，1 = PCF 3x3
 	int  ShadowMode() const { return m_shadowMode; }
 	void SetShadowMode(int mode) { m_shadowMode = mode; }
@@ -131,6 +142,24 @@ public:
 	// hdr = false：shader 自己编码 sRGB，直接写默认帧缓冲
 	void Render(CShader& shader, const glm::mat4& projection, bool hdr = true);
 
+	// ---- 延迟着色 ----
+	// 1) 几何 Pass：只画材质属性进 G-buffer（内部会重建本帧的阴影图）
+	void RenderToGBuffer(CShader& shader, const glm::mat4& projection);
+	// 2) 光照 Pass 前调用：上传灯光/阴影 uniform 并绑定阴影贴图。
+	//    必须在 RenderToGBuffer 之后（阴影图是它生成的），本身不再重画阴影
+	void SetupDeferredLighting(CShader& shader, const glm::mat4& projection);
+
+	// ---- 平面反射 ----
+	// 只用指定的 view/projection 画一遍几何（镜面反射的 G-buffer Pass），
+	// 不重画阴影图（沿用本帧主 Pass 的结果）。hdr 交给调用方决定输出格式。
+	void RenderGeometryTo(CShader& shader, const glm::mat4& view,
+		const glm::mat4& projection);
+
+	// 镜面反射的延迟光照 Pass：把相机换成镜像相机后上传灯光/阴影 uniform。
+	// 必须在本帧 RenderToGBuffer 之后调用，否则阴影图还没生成。
+	void SetupDeferredLightingFor(CShader& shader, const glm::mat4& view,
+		const glm::mat4& projection);
+
 	// 预先创建n个阴影 Pass
 	void PrepareShadows(int count = 3);
 
@@ -140,6 +169,20 @@ public:
 	glm::mat4    GetLightSpaceMatrix(int lightIndex) const;
 
 private:
+	// 渲染拆成几步，前向和延迟共用
+	void BuildShadowMaps();       // 重画本帧所有阴影图
+	void UploadCamera(CShader& shader, const glm::mat4& projection);
+	void UploadLights(CShader& shader);
+	void BindShadowMaps(CShader& shader);
+	void DrawGroups(CShader& shader, bool hdr);
+
+	std::vector<glm::mat4>                    m_shadowMats;   // 本帧各光源的 lightSpace 矩阵
+	std::vector<float>                        m_pointFar;     // 本帧各点光的 farPlane
+
+	// 手电筒平滑跟随用的状态（首次调用时直接对齐，之后指数插值）
+	glm::vec3                                 m_followDir{ 0.0f, 0.0f, -1.0f };
+	bool                                      m_followInit = false;
+
 	std::vector<std::unique_ptr<Group>>       m_groups;
 	std::vector<CLight>                       m_lights;
 	std::vector<std::unique_ptr<CShadow>>     m_shadowPasses;   // 聚光灯：2D 深度图

@@ -13,6 +13,16 @@ uniform bool  uToneMapping;
 uniform sampler2D fogBuffer;
 uniform bool      uHasFog;
 
+// Bloom：亮部模糊后的纹理
+uniform sampler2D bloomBuffer;
+uniform bool      uHasBloom;
+uniform float     uBloomStrength;
+
+// SSAO：屏幕空间遮蔽（1 = 无遮蔽，0 = 全遮蔽）
+uniform sampler2D aoBuffer;
+uniform bool      uHasAO;
+uniform float     uAOStrength;
+
 vec3 ACES(vec3 x);
 
 void main()
@@ -21,11 +31,22 @@ void main()
 
     // 体积雾合成：先按透射率衰减，再叠加散射光
     // 必须在线性空间、色调映射之前做
+    // SSAO：只压暗环境光那一部分，直接乘在场景颜色上（近似）
+    if (uHasAO)
+    {
+        float ao = texture(aoBuffer, vUV).r;
+        hdr *= mix(1.0, ao, uAOStrength);
+    }
+
     if (uHasFog)
     {
         vec4 fog = texture(fogBuffer, vUV);
         hdr = hdr * fog.a + fog.rgb;
     }
+
+    // Bloom：在色调映射之前叠加，超亮部分会被 ACES 一起压回去
+    if (uHasBloom)
+        hdr += texture(bloomBuffer, vUV).rgb * uBloomStrength;
 
     vec3 color = hdr;
     if (uToneMapping)

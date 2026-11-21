@@ -36,11 +36,11 @@ public:
 
 	// ---- 参数（ImGui 可调）----
 	bool  enabled       = true;
-	float densityBase   = 0.20f;    // 整体浓度
+	float densityBase   = 0.30f;    // 整体浓度
 	float heightFalloff = 0.35f;    // 高度衰减速度
 	float fogBaseHeight = 0.0f;     // 从这个高度开始衰减
 	float maxDistance   = 30.0f;    // 最远步进距离
-	float phaseG        = 0.6f;     // 相函数：越大越聚成光束
+	float phaseG        = 0.4f;     // 相函数：越大越聚成光束
 
 private:
 	void CreateFBO();
@@ -48,6 +48,8 @@ private:
 
 	unsigned int m_fbo     = 0;
 	unsigned int m_fogTex  = 0;
+	unsigned int m_blurFbo = 0;
+	unsigned int m_blurTex = 0;
 	unsigned int m_quadVao = 0;
 
 	int m_width  = 0;
@@ -56,4 +58,5 @@ private:
 	int m_savedViewport[4] = { 0, 0, 0, 0 };
 
 	CShader m_shader;
+	CShader m_blurShader;   // 分离式高斯：抹掉步进抖动产生的颗粒和条带
 };

@@ -22,3 +22,20 @@ void SetupScene(CScene& scene);
 
 // ImGui 面板用的可编辑模型列表（SetupScene 之后有效）
 std::vector<ModelHandle>& SceneModels();
+
+// 蜡烛火焰根部（世界坐标），每帧读取，跟随 ImGui 拖动
+glm::vec3 CandleFlamePosition();
+
+// 洗手间镜子的玻璃面（平面反射用）：中心点、朝向房间的法线、半宽/半高。
+// 会跟随 ImGui 里拖动过的 "BathroomMirror" 模型位置
+struct MirrorSurface
+{
+	glm::vec3 center{ 0.0f };
+	glm::vec3 normal{ 0.0f, 0.0f, 1.0f };
+	float     halfWidth  = 0.7f;
+	float     halfHeight = 0.54f;
+};
+MirrorSurface BathroomMirrorSurface();
+
+// 镜子模型所在的分组（反射 Pass 里要临时藏掉它，否则镜子里会看到镜子自己）
+CScene::Group* BathroomMirrorGroup();
