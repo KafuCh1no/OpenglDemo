@@ -101,9 +101,5 @@ bool CModel::Load(const std::string& path,
 		}
 	}
 
-	std::cout << "[CModel] " << path
-		<< "  verts=" << verts.size() / 11
-		<< "  tris=" << indices.size() / 3 << "\n";
-
 	return true;
 }

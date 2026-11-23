@@ -251,30 +251,44 @@ void SetupScene(CScene& scene)
 
 	CTexture& chairAlbedo  = Tex("assets/models/chair/Textures/Blender_2K/T_Chair_BaseColor.jpg");
 	CTexture& chairNormal  = Tex("assets/models/chair/Textures/Blender_2K/T_Chair_Normal.png", false);
+	// roughness 是单通道灰度图；配套的 Metallic 贴图整张全黑（该资产没有金属部件），
+	// 接入时必须关掉 mrUseMetallic，否则 B 通道会被当成金属度
+	CTexture& chairRough   = Tex("assets/models/chair/textures/T_Chair_Roughness.png", false);
 
 	CTexture& candleAlbedo = Tex("assets/models/the_bathroom_free/textures/Candle_baseColor.png");
 	CTexture& candleNormal = Tex("assets/models/the_bathroom_free/textures/Candle_normal.png", false);
 
+	// Poly Haven 的 ARM 贴图：R=AO, G=Roughness, B=Metallic，
+	// 通道布局正好符合 glTF 约定，可以直接当 metallicRoughness 用
 	CTexture& cabinetAlbedo = Tex("assets/models/gothic-cabinet/textures/GothicCabinet_01_diff_2k.jpg");
 	CTexture& cabinetNormal = Tex("assets/models/gothic-cabinet/textures/GothicCabinet_01_nor_gl_2k.jpg", false);
+	CTexture& cabinetMR     = Tex("assets/models/gothic-cabinet/textures/GothicCabinet_01_arm_2k.jpg", false);
 
 	CTexture& barrelAlbedo = Tex("assets/models/barrel/textures/Barrel_01_diff.jpg");
 	CTexture& barrelNormal = Tex("assets/models/barrel/textures/Barrel_01_nor.jpg", false);
+	CTexture& barrelMR     = Tex("assets/models/barrel/textures/Barrel_01_oxide_grey_arm_2k.jpg", false);
 
 	CTexture& lanternAlbedo = Tex("assets/models/lantern/textures/Lantern_01_brass_diff_2k.jpg");
 	CTexture& lanternNormal = Tex("assets/models/lantern/textures/Lantern_01_brass_nor_gl_2k.jpg", false);
+	CTexture& lanternMR     = Tex("assets/models/lantern/textures/Lantern_01_brass_arm_2k.jpg", false);
 
 	CTexture& chandelierAlbedo = Tex("assets/models/chandelier/textures/Chandelier_02_diff_2k.jpg");
 	CTexture& chandelierNormal = Tex("assets/models/chandelier/textures/Chandelier_02_nor_gl_2k.jpg", false);
+	CTexture& chandelierMR     = Tex("assets/models/chandelier/textures/Chandelier_02_arm_2k.jpg", false);
 
 	CTexture& fireplaceAlbedo = Tex("assets/models/fireplace/textures/fireplace_baseColor.jpg");
 	CTexture& fireplaceNormal = Tex("assets/models/fireplace/textures/fireplace_normal.jpg", false);
+	CTexture& fireplaceMR     = Tex("assets/models/fireplace/textures/fireplace_metallicRoughness.png", false);
 
 	// 相框：木框 + 画布两套材质，拆成两个 obj
+	// rough 是单通道灰度图（没有 metallic 数据），接入时必须关掉 mrUseMetallic，
+	// 否则 B 通道会被当成金属度，木头画框会变成半金属
 	CTexture& frameAlbedo  = Tex("assets/models/fancy_picture_frame/textures/fancy_picture_frame_01_diff_4k.jpg");
 	CTexture& frameNormal  = Tex("assets/models/fancy_picture_frame/textures/fancy_picture_frame_01_nor_gl_4k.jpg", false);
+	CTexture& frameRough   = Tex("assets/models/fancy_picture_frame/textures/fancy_picture_frame_01_rough_4k.jpg", false);
 	CTexture& canvasAlbedo = Tex("assets/models/fancy_picture_frame/textures/fancy_picture_frame_01_canvas_diff_4k.jpg");
 	CTexture& canvasNormal = Tex("assets/models/fancy_picture_frame/textures/fancy_picture_frame_01_canvas_nor_gl_4k.jpg", false);
+	CTexture& canvasRough  = Tex("assets/models/fancy_picture_frame/textures/fancy_picture_frame_01_canvas_rough_4k.jpg", false);
 
 	CTexture& windowAlbedo = Tex("assets/models/wooden_window/textures/Scene_-_Root_baseColor.png");
 	CTexture& windowNormal = Tex("assets/models/wooden_window/textures/Scene_-_Root_normal.png", false);
@@ -312,7 +326,7 @@ void SetupScene(CScene& scene)
 		glm::vec3(-1.7f, -0.25f, 6.5f),
 		glm::vec3(0.0f),
 		glm::vec3(0.065f),
-		{ &tableAlbedo, glm::vec3(1.0f), 1.0f, &tableNormal, 1.0f });
+		{ &tableAlbedo, glm::vec3(1.0f), 1.0f, &tableNormal, 1.0f , 0.0f, 0.65f}); // 最后两个参数为metallic、roughness
 
 	// 蜡烛
 	{
@@ -320,7 +334,7 @@ void SetupScene(CScene& scene)
 			glm::vec3(-1.5f, 1.22f, 6.0f),
 			glm::vec3(-90.0f, 120.0f, 0.0f),
 			glm::vec3(1.5f),
-			MRMat(&candleAlbedo, &candleNormal, &candleMR),
+			MRMat(&candleAlbedo, &candleNormal, &candleMR),  // MEMat会把 roughness 和 metallic 自动设成 1.0
 			false);
 		reg("Candle", gCandle);
 	}
@@ -331,35 +345,35 @@ void SetupScene(CScene& scene)
 		glm::vec3(-1.3f, 0.05f, 8.0f),
 		glm::vec3(3.0f, 90.0f, 90.0f),
 		glm::vec3(1.25f),
-		{ &chairAlbedo, glm::vec3(1.0f), 1.0f, &chairNormal, 1.0f });
+		MRMat(&chairAlbedo, &chairNormal, &chairRough, glm::vec3(1.0f), 1.0f, false));
 
 	// 西南
 	scene.AddModel("assets/models/chair/SM_Chair.obj",
 		glm::vec3(-2.7f, 0.0f, 8.0f),
 		glm::vec3(3.0f, 150.0f, 0.0f),
 		glm::vec3(1.25f),
-		{ &chairAlbedo, glm::vec3(1.0f), 1.0f, &chairNormal, 1.0f });
+		MRMat(&chairAlbedo, &chairNormal, &chairRough, glm::vec3(1.0f), 1.0f, false));
 
 	// 西北
 	scene.AddModel("assets/models/chair/SM_Chair.obj",
 		glm::vec3(-3.0f, 0.0f, 5.0f),
 		glm::vec3(-85.0f, 0.0f, 0.0f),
 		glm::vec3(1.25f),
-		{ &chairAlbedo, glm::vec3(1.0f), 1.0f, &chairNormal, 1.0f });
+		MRMat(&chairAlbedo, &chairNormal, &chairRough, glm::vec3(1.0f), 1.0f, false));
 
 	// 东北
 	scene.AddModel("assets/models/chair/SM_Chair.obj",
 		glm::vec3(-0.3f, 0.0f, 5.0f),
 		glm::vec3(0.0f, 60.0f, 0.0f),
 		glm::vec3(1.25f),
-		{ &chairAlbedo, glm::vec3(1.0f), 1.0f, &chairNormal, 1.0f });
+		MRMat(&chairAlbedo, &chairNormal, &chairRough, glm::vec3(1.0f), 1.0f, false));
 
 	// 柜子
 	scene.AddModel("assets/models/gothic-cabinet/GothicCabinet_01.obj",
 		glm::vec3(-7.0f, 0.0f, 9.3f),
 		glm::vec3(0.0f, 180.0f, 0.0f),
 		glm::vec3(1.5f),
-		{ &cabinetAlbedo, glm::vec3(1.0f), 1.0f, &cabinetNormal, 1.0f });
+		MRMat(&cabinetAlbedo, &cabinetNormal, &cabinetMR));
 
 	// 铁桶
 	{
@@ -367,7 +381,7 @@ void SetupScene(CScene& scene)
 			glm::vec3(-8.0f, 0.0f, -15.4f),
 			glm::vec3(0.0f),
 			glm::vec3(1.5f),
-			{ &barrelAlbedo, glm::vec3(1.0f), 1.0f, &barrelNormal, 1.0f });
+			MRMat(&barrelAlbedo, &barrelNormal, &barrelMR));
 		reg("Barrel", g);
 	}
 
@@ -377,7 +391,7 @@ void SetupScene(CScene& scene)
 			glm::vec3(1.2f, 0.0f, 2.9f),
 			glm::vec3(0.0f, 20.0f, 0.0f),
 			glm::vec3(2.5f),
-			{ &lanternAlbedo, glm::vec3(1.0f), 1.0f, &lanternNormal, 1.0f });
+			MRMat(&lanternAlbedo, &lanternNormal, &lanternMR));
 		reg("Lantern", g);
 	}
 
@@ -387,7 +401,7 @@ void SetupScene(CScene& scene)
 			glm::vec3(-2.5f, 2.4f, 4.0f),
 			glm::vec3(0.0f),
 			glm::vec3(2.6f),
-			{ &chandelierAlbedo, glm::vec3(1.0f), 1.0f, &chandelierNormal, 1.0f });
+			MRMat(&chandelierAlbedo, &chandelierNormal, &chandelierMR));
 		reg("Chandelier", g);
 	}
 
@@ -396,19 +410,20 @@ void SetupScene(CScene& scene)
 		glm::vec3(2.5f, 0.0f, 0.57f),
 		glm::vec3(0.0f, 90.0f, 0.0f),
 		glm::vec3(1.5f),
-		{ &fireplaceAlbedo, glm::vec3(1.0f), 1.0f, &fireplaceNormal, 1.0f });
+		MRMat(&fireplaceAlbedo, &fireplaceNormal, &fireplaceMR));
 
 	// 相框
 	{
 		const glm::vec3 framePos(-3.5f, 2.3f, 0.0f);
 
+		// rough 贴图没有 metallic 信息，最后一个参数传 false 只取 G 通道
 		scene.AddModel("assets/models/fancy_picture_frame/frame.obj",
 			framePos, glm::vec3(0.0f), glm::vec3(3.5f),
-			{ &frameAlbedo, glm::vec3(1.0f), 1.0f, &frameNormal, 1.0f });
+			MRMat(&frameAlbedo, &frameNormal, &frameRough, glm::vec3(1.0f), 1.0f, false));
 
 		scene.AddModel("assets/models/fancy_picture_frame/canvas.obj",
 			framePos, glm::vec3(0.0f), glm::vec3(3.5f),
-			{ &canvasAlbedo, glm::vec3(1.0f), 1.0f, &canvasNormal, 1.0f });
+			MRMat(&canvasAlbedo, &canvasNormal, &canvasRough, glm::vec3(1.0f), 1.0f, false));
 	}
 
 	// 餐厅木窗

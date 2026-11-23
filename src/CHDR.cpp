@@ -27,7 +27,6 @@ void CHDR::CreateFBO()
 	glGenFramebuffers(1, &m_fbo);
 	glGenTextures(1, &m_colorTex);
 	glGenTextures(1, &m_depthTex);
-	glGenTextures(1, &m_normalTex);
 
 	// 颜色附件：16 位浮点。用 RGBA 而不是 RGB —— RGB16F 在部分驱动上不可作为渲染目标
 	glBindTexture(GL_TEXTURE_2D, m_colorTex);
@@ -36,16 +35,6 @@ void CHDR::CreateFBO()
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	// 全屏三角的 UV 会超出 [0,1] 一点，必须 clamp，否则边缘采样到别的像素
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glBindTexture(GL_TEXTURE_2D, 0);
-
-	// 法线附件：SSAO 需要，保存世界空间法线
-	glBindTexture(GL_TEXTURE_2D, m_normalTex);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, m_width, m_height, 0,
-		GL_RGBA, GL_FLOAT, nullptr);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glBindTexture(GL_TEXTURE_2D, 0);
@@ -64,12 +53,11 @@ void CHDR::CreateFBO()
 
 	glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_colorTex, 0);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, m_normalTex, 0);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,  GL_TEXTURE_2D, m_depthTex, 0);
 
-	// 两个颜色附件：0 = HDR 颜色，1 = 法线
-	const GLenum attachments[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
-	glDrawBuffers(2, attachments);
+	// 单个颜色附件：HDR 颜色。法线来自 G-buffer，不在这里重复存
+	const GLenum attachments[1] = { GL_COLOR_ATTACHMENT0 };
+	glDrawBuffers(1, attachments);
 
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
 		std::cout << "[CHDR] FBO incomplete!\n";
@@ -100,12 +88,11 @@ void CHDR::DestroyFBO()
 {
 	if (m_depthTex) glDeleteTextures(1, &m_depthTex);
 	if (m_colorTex) glDeleteTextures(1, &m_colorTex);
-	if (m_normalTex) glDeleteTextures(1, &m_normalTex);
 	if (m_fbo)      glDeleteFramebuffers(1, &m_fbo);
 	if (m_ldrTex)   glDeleteTextures(1, &m_ldrTex);
 	if (m_ldrFbo)   glDeleteFramebuffers(1, &m_ldrFbo);
 
-	m_depthTex = m_colorTex = m_normalTex = m_fbo = 0;
+	m_depthTex = m_colorTex = m_fbo = 0;
 	m_ldrTex = m_ldrFbo = 0;
 }
 
@@ -127,13 +114,6 @@ void CHDR::Resize(int width, int height)
 	glBindTexture(GL_TEXTURE_2D, m_depthTex);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, m_width, m_height, 0,
 		GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
-	glBindTexture(GL_TEXTURE_2D, 0);
-
-	// 法线附件也必须跟着改尺寸：FBO 的绘制区域取所有附件的最小尺寸，
-	// 只改颜色/深度的话，窗口变大后画面会被限死在旧的法线图尺寸上
-	glBindTexture(GL_TEXTURE_2D, m_normalTex);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, m_width, m_height, 0,
-		GL_RGBA, GL_FLOAT, nullptr);
 	glBindTexture(GL_TEXTURE_2D, 0);
 
 	// FXAA 的输入也跟着改尺寸

@@ -32,9 +32,7 @@ public:
 	unsigned int GetColorTexture() const { return m_colorTex; }
 	// HDR FBO 本身：延迟着色要把 G-buffer 的深度拷进来
 	unsigned int GetFBO() const { return m_fbo; }
-	unsigned int m_normalTex = 0;   // 法线缓冲（MRT，SSAO 采样）
 	unsigned int GetDepthTexture() const { return m_depthTex; }
-	unsigned int GetNormalTexture() const { return m_normalTex; }   // SSAO 用：世界空间法线
 	// 色调映射的输出（LDR，8 位），给 FXAA 当输入
 	unsigned int GetLDRTexture() const { return m_ldrTex; }
 

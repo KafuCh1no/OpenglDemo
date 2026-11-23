@@ -136,12 +136,6 @@ public:
 	void MoveCamera(const glm::vec3& delta, float radius, float height);
 	const std::vector<Box>& Boxes() const { return m_boxes; }
 
-	// 渲染
-	// 内部依次执行：阴影 Pass -> 传灯光/相机 uniform -> 按材质绘制几何
-	// hdr = true：输出线性值（配合 CHDR 的浮点缓冲 + 色调映射）
-	// hdr = false：shader 自己编码 sRGB，直接写默认帧缓冲
-	void Render(CShader& shader, const glm::mat4& projection, bool hdr = true);
-
 	// ---- 延迟着色 ----
 	// 1) 几何 Pass：只画材质属性进 G-buffer（内部会重建本帧的阴影图）
 	void RenderToGBuffer(CShader& shader, const glm::mat4& projection);
@@ -186,7 +180,7 @@ private:
 	void UploadCamera(CShader& shader, const glm::mat4& projection);
 	void UploadLights(CShader& shader);
 	void BindShadowMaps(CShader& shader);
-	void DrawGroups(CShader& shader, bool hdr);
+	void DrawGroups(CShader& shader);
 
 	std::vector<glm::mat4>                    m_shadowMats;   // 本帧各光源的 lightSpace 矩阵
 	std::vector<float>                        m_pointFar;     // 本帧各点光的 farPlane

@@ -165,9 +165,6 @@ CScene::Group& CScene::AddModel(const std::string& path,
 
 		g.boxIndex = (int)m_boxes.size();
 		m_boxes.push_back({ mn, mx });
-		std::cout << "[AddModel] AABB min=(" << mn.x << "," << mn.y << "," << mn.z
-			<< ") max=(" << mx.x << "," << mx.y << "," << mx.z
-			<< ") size=(" << (mx.x - mn.x) << "," << (mx.y - mn.y) << "," << (mx.z - mn.z) << ")\n";
 	}
 
 	return g;
@@ -442,12 +439,8 @@ void CScene::BindShadowMaps(CShader& shader)
 	}
 }
 
-void CScene::DrawGroups(CShader& shader, bool hdr)
+void CScene::DrawGroups(CShader& shader)
 {
-	// HDR 模式由主循环决定：false 时 shader 自己编码，不经过浮点缓冲
-	// G-buffer 的材质 shader 没有这个 uniform，设了也是无害的空操作
-	shader.setBool("uHDR", hdr);
-
 	// 按材质分组绘制
 	for (auto& g : m_groups)
 	{
@@ -506,18 +499,6 @@ void CScene::DrawGroups(CShader& shader, bool hdr)
 	}
 }
 
-void CScene::Render(CShader& shader, const glm::mat4& projection, bool hdr)
-{
-	BuildShadowMaps();
-
-	shader.use();
-	UploadCamera(shader, projection);
-	UploadLights(shader);
-	BindShadowMaps(shader);
-
-	DrawGroups(shader, hdr);
-}
-
 void CScene::RenderToGBuffer(CShader& shader, const glm::mat4& projection)
 {
 	// 阴影图只在这里生成一次，之后的延迟光照 Pass 直接复用
@@ -526,7 +507,7 @@ void CScene::RenderToGBuffer(CShader& shader, const glm::mat4& projection)
 	shader.use();
 	UploadCamera(shader, projection);
 
-	DrawGroups(shader, true);
+	DrawGroups(shader);
 }
 
 void CScene::SetupDeferredLighting(CShader& shader, const glm::mat4& projection)
@@ -546,7 +527,7 @@ void CScene::RenderGeometryTo(CShader& shader, const glm::mat4& view,
 	shader.setMat4("view", view);
 	shader.setVec3("viewPos", cameraPos);
 
-	DrawGroups(shader, true);
+	DrawGroups(shader);
 }
 
 void CScene::SetupDeferredLightingFor(CShader& shader, const glm::mat4& view,

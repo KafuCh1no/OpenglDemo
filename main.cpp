@@ -252,7 +252,6 @@ int main()
 	// 搭建场景
 	SetupScene(gScene);
 
-	CShader shader("assets/shaders/horror.vert", "assets/shaders/horror.frag");
 	// 延迟着色的几何 Pass：只写 G-buffer，不算光照
 	CShader gbufferShader("assets/shaders/gbuffer.vert", "assets/shaders/gbuffer.frag");
 	// 交互描边：沿法线外扩画一遍背面
@@ -279,7 +278,6 @@ int main()
 	// 这里不要再覆盖 direction / cutoffDeg，否则会被当成聚光处理。
 	ibl.Generate();
 
-	bool useDeferred = true;    // 延迟着色开关（ImGui 可切回前向）
 	CLightning lightning;       // 月光闪电（只改平行光亮度，不新增光源）
 
 	// 首帧 dt 会等于整个初始化耗时（模型加载 + IBL 烘焙十几秒），
@@ -391,78 +389,60 @@ int main()
 		gScene.Lights()[kCandleIndex].enabled = candleLit;
 		flame.enabled = candleLit;
 
-		if (hdr.enabled)
 		{
-			// 后处理要采样的深度/法线：延迟走 G-buffer，前向走 HDR 缓冲
+			// 后处理要采样的深度/法线，都来自 G-buffer
 			unsigned int depthTex  = 0;
 			unsigned int normalTex = 0;
 
-			if (useDeferred)
+			// ---- 几何 Pass：只写 G-buffer（阴影图也在这一步生成） ----
+			gbuf.Begin();
+			gScene.RenderToGBuffer(gbufferShader, projection);
+			gbuf.End();
+
+			// 环境光贴图交给光照 Pass（主画面和镜面反射共用同一套 IBL 参数）
+			deferred.iblIrradiance = ibl.GetIrradianceMap();
+			deferred.iblPrefilter  = ibl.GetPrefilterMap();
+			deferred.iblBrdf       = ibl.GetBrdfLUT();
+			deferred.iblEnabled    = ibl.enabled;
+			deferred.envIntensity  = ibl.intensity;
+
+			// ---- 平面反射：阴影图已就绪，把场景按镜像相机再画一遍 ----
+			if (mirror.enabled)
 			{
-				// ---- 几何 Pass：只写 G-buffer（阴影图也在这一步生成） ----
-				gbuf.Begin();
-				gScene.RenderToGBuffer(gbufferShader, projection);
-				gbuf.End();
+				// 镜子里不能看到镜子自己，反射 Pass 期间临时藏掉它
+				CScene::Group* mirrorGroup = BathroomMirrorGroup();
+				if (mirrorGroup) mirrorGroup->visible = false;
 
-				// 环境光贴图交给光照 Pass（主画面和镜面反射共用同一套 IBL 参数）
-				deferred.iblIrradiance = ibl.GetIrradianceMap();
-				deferred.iblPrefilter  = ibl.GetPrefilterMap();
-				deferred.iblBrdf       = ibl.GetBrdfLUT();
-				deferred.iblEnabled    = ibl.enabled;
-				deferred.envIntensity  = ibl.intensity;
+				mirror.RenderReflection(gScene, gbufferShader, deferred, projection,
+					gScene.GetView(), gScene.cameraPos);
 
-				// ---- 平面反射：阴影图已就绪，把场景按镜像相机再画一遍 ----
-				if (mirror.enabled)
-				{
-					// 镜子里不能看到镜子自己，反射 Pass 期间临时藏掉它
-					CScene::Group* mirrorGroup = BathroomMirrorGroup();
-					if (mirrorGroup) mirrorGroup->visible = false;
-
-					mirror.RenderReflection(gScene, gbufferShader, deferred, projection,
-						gScene.GetView(), gScene.cameraPos);
-
-					if (mirrorGroup) mirrorGroup->visible = true;
-				}
-
-				// ---- 光照 Pass：逐像素读 G-buffer 算光照，写进 HDR 缓冲 ----
-				// alpha 清 0：bloom 用它当自发光遮罩，只有火焰会把 alpha 抬起来
-				hdr.Begin();
-				glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-				glClear(GL_COLOR_BUFFER_BIT);
-
-				gScene.SetupDeferredLighting(deferred.Shader(), projection);
-
-				deferred.Render(gbuf.GetAlbedoTexture(), gbuf.GetNormalTexture(),
-					gbuf.GetPositionTexture());
-
-				// 把 G-buffer 的深度拷进来：火焰要靠它被不透明几何正确遮挡
-				glBindFramebuffer(GL_READ_FRAMEBUFFER, gbuf.GetFBO());
-				glBindFramebuffer(GL_DRAW_FRAMEBUFFER, hdr.GetFBO());
-				glBlitFramebuffer(0, 0, fbw, fbh, 0, 0, fbw, fbh,
-					GL_DEPTH_BUFFER_BIT, GL_NEAREST);
-				glBindFramebuffer(GL_FRAMEBUFFER, hdr.GetFBO());
-				glEnable(GL_DEPTH_TEST);
-
-				depthTex  = gbuf.GetDepthTexture();
-				normalTex = gbuf.GetNormalTexture();
+				if (mirrorGroup) mirrorGroup->visible = true;
 			}
-			else
-			{
-				// HDR Pass：场景画进浮点缓冲，> 1.0 的亮度不被切掉
-				hdr.Begin();
-				glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-				glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-				// 阴影 Pass + 灯光 uniform + 按材质绘制，全在场景内部完成
-				gScene.Render(shader, projection, true);
+			// ---- 光照 Pass：逐像素读 G-buffer 算光照，写进 HDR 缓冲 ----
+			// alpha 清 0：bloom 用它当自发光遮罩，只有火焰会把 alpha 抬起来
+			hdr.Begin();
+			glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+			glClear(GL_COLOR_BUFFER_BIT);
 
-				depthTex  = hdr.GetDepthTexture();
-				normalTex = hdr.GetNormalTexture();
-			}
+			gScene.SetupDeferredLighting(deferred.Shader(), projection);
+
+			deferred.Render(gbuf.GetAlbedoTexture(), gbuf.GetNormalTexture(),
+				gbuf.GetPositionTexture());
+
+			// 把 G-buffer 的深度拷进来：火焰要靠它被不透明几何正确遮挡
+			glBindFramebuffer(GL_READ_FRAMEBUFFER, gbuf.GetFBO());
+			glBindFramebuffer(GL_DRAW_FRAMEBUFFER, hdr.GetFBO());
+			glBlitFramebuffer(0, 0, fbw, fbh, 0, 0, fbw, fbh,
+				GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+			glBindFramebuffer(GL_FRAMEBUFFER, hdr.GetFBO());
+			glEnable(GL_DEPTH_TEST);
+
+			depthTex  = gbuf.GetDepthTexture();
+			normalTex = gbuf.GetNormalTexture();
 
 			// 镜面：把反射纹理贴到洗手间镜子上
-			if (useDeferred)
-				mirror.Draw(gScene, projection, gScene.GetView(), gScene.cameraPos);
+			mirror.Draw(gScene, projection, gScene.GetView(), gScene.cameraPos);
 
 			// 交互描边：进度 > 0 就画，这样淡出时也能看到轮廓收回
 			// 只画背面 + 不写深度：外扩出来的壳正好露在物体外侧
@@ -530,17 +510,6 @@ int main()
 
 
 		}
-		else
-		{
-			// LDR 直出
-			glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-			gScene.Render(shader, projection, false);
-
-			if (candleLit)
-				flame.Render(projection * gScene.GetView(), CandleFlamePosition(),
-					(float)glfwGetTime());
-		}
 
 		// ================= ImGui =================
 		ImGui_ImplOpenGL3_NewFrame();
@@ -571,19 +540,8 @@ int main()
 
 		// ---- 渲染管线 ----
 		ImGui::Text("渲染");
-		ImGui::Checkbox("HDR", &hdr.enabled);
-		if (hdr.enabled)
-		{
-			ImGui::SameLine();
-			ImGui::Checkbox("色调映射", &hdr.toneMapping);
-			ImGui::SliderFloat("曝光", &hdr.exposure, 0.1f, 5.0f);
-		}
-		else
-		{
-			ImGui::SameLine();
-			ImGui::TextDisabled("(LDR 直出)");
-		}
-		ImGui::Checkbox("延迟着色", &useDeferred);
+		ImGui::Checkbox("色调映射", &hdr.toneMapping);
+		ImGui::SliderFloat("曝光", &hdr.exposure, 0.1f, 5.0f);
 		ImGui::Checkbox("IBL 环境光", &ibl.enabled);
 		ImGui::Checkbox("FXAA", &fxaa.enabled);
 		ImGui::Separator();
