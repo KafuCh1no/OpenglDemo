@@ -1,6 +1,5 @@
 #version 330 core
 // 漫反射辐照度卷积：对每个方向，把半球上所有方向的环境光按 cos 加权积分。
-// 结果是低频的，所以只需要 32x32 一张 cubemap。
 out vec4 FragColor;
 
 in vec3 vLocalPos;
@@ -25,9 +24,11 @@ void main()
     // 球面坐标积分：phi 绕一圈，theta 从法线到地表
     for (float phi = 0.0; phi < 2.0 * PI; phi += sampleDelta)
     {
+        // 乘0.5是因为只需要求上半球
         for (float theta = 0.0; theta < 0.5 * PI; theta += sampleDelta)
         {
-            // 切空间 -> 世界空间
+            // 球面空间 -> 世界空间
+            // 单位向量
             vec3 tangentSample = vec3(sin(theta) * cos(phi),
                                       sin(theta) * sin(phi),
                                       cos(theta));
