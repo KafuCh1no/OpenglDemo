@@ -478,6 +478,20 @@ void CScene::DrawGroups(CShader& shader, bool hdr)
 		{
 			shader.setBool("uHasNormalMap", false);
 		}
+
+		// 金属度/粗糙度贴图：14 号单元（8~13 被 deferred 的 IBL 占用）
+		if (mat.HasMRMap())
+		{
+			mat.metallicRoughnessMap->Bind(14);
+			shader.setInt("metallicRoughnessMap", 14);
+			shader.setBool("uHasMRMap", true);
+			shader.setBool("uMRUseMetallic", mat.mrUseMetallic);
+		}
+		else
+		{
+			shader.setBool("uHasMRMap", false);
+		}
+
 		shader.setVec3("tint", mat.tint);
 		shader.setFloat("uScale", mat.uScale);
 		// PBR 材质参数（前向 shader 没有这两个 uniform，设了是无害空操作）
@@ -536,12 +550,38 @@ void CScene::RenderGeometryTo(CShader& shader, const glm::mat4& view,
 }
 
 void CScene::SetupDeferredLightingFor(CShader& shader, const glm::mat4& view,
-	const glm::mat4& projection)
+	const glm::mat4& projection, const glm::vec3& eyePos)
 {
 	shader.use();
 	shader.setMat4("projection", projection);
 	shader.setMat4("view", view);
+	// 反射画面的"眼睛"是镜像相机，不是主相机
+	shader.setVec3("viewPos", eyePos);
 
 	UploadLights(shader);
 	BindShadowMaps(shader);
+}
+
+void CScene::UploadLightingUniforms(CShader& shader)
+{
+	shader.use();
+	UploadLights(shader);
+}
+
+void CScene::DrawOutline(CShader& shader, Group& g, const glm::mat4& viewProj,
+	float thickness, const glm::vec3& color,
+	float yMin, float yMax, float progress)
+{
+	if (!g.mesh) return;
+
+	shader.use();
+	shader.setMat4("uViewProj", viewProj);
+	shader.setMat4("model", ComposeTransform(g.modelPos, g.modelRotDeg, g.modelScale));
+	shader.setFloat("uThickness", thickness);
+	shader.setVec3("uColor", color);
+	shader.setFloat("uMinY", yMin);
+	shader.setFloat("uMaxY", yMax);
+	shader.setFloat("uProgress", progress);
+
+	g.mesh->Draw();
 }

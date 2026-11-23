@@ -24,7 +24,10 @@ public:
 
 	// ---- 参数 ----
 	bool  enabled   = true;
-	float threshold = 5.0f;    // 亮度阈值
+	// true  = 只有自发光物体（蜡烛火焰）产生光晕
+	// false = 全屏按亮度阈值提取（手电筒照白墙也会发光晕）
+	bool  onlyEmissive = true;
+	float threshold = 10.0f;    // 亮度阈值
 	float strength  = 0.8f;    // 叠加到 HDR 上的强度
 	float radius    = 1.5f;    // 模糊半径倍率
 	int   iterations = 2;      // 来回模糊的轮数，越多越糊

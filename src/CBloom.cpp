@@ -106,6 +106,8 @@ void CBloom::Render(unsigned int hdrColorTex)
 	m_extractShader.use();
 	m_extractShader.setInt("uHdr", 0);
 	m_extractShader.setFloat("uThreshold", threshold);
+	// 只从自发光（HDR 的 alpha）提取，避免手电筒扫过白墙时也出光晕
+	m_extractShader.setBool("uOnlyEmissive", onlyEmissive);
 
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, hdrColorTex);

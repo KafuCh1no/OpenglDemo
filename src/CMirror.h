@@ -39,7 +39,9 @@ public:
 		const glm::vec3& cameraPos);
 
 	// 主 Pass 之后：把反射纹理贴到镜面上（需要主 Pass 的深度缓冲做遮挡）
-	void Draw(const glm::mat4& projection, const glm::mat4& mainView);
+	// scene 用来上传光源：镜面被手电筒照到时要有反光
+	void Draw(CScene& scene, const glm::mat4& projection, const glm::mat4& mainView,
+		const glm::vec3& cameraPos);
 
 	unsigned int GetTexture() const { return m_colorTex; }
 	bool IsValid() const { return m_colorTex != 0 && m_depthRbo != 0; }
@@ -48,6 +50,7 @@ public:
 	bool  enabled = true;
 	float tint      = 1.0f;     // 反射整体亮度（老镜子可以调暗一点）
 	float edgeFade  = 0.06f;    // 边缘压暗宽度（镜框内侧的渐变）
+	float specStrength = 0.6f;  // 镜面反光强度：0 = 只有反射，没有玻璃高光
 
 private:
 	void CreateFBO();

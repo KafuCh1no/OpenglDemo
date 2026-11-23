@@ -36,8 +36,8 @@ float lastX = 640.0f, lastY = 360.0f;
 bool  firstMouse = true;
 float deltaTime = 0.0f, lastFrame = 0.0f;
 
-// 手电筒开关（对应 gScene.Lights() 里的手电筒灯）
-bool flashlightOn = true;
+// 手电筒开关（对应 gScene.Lights() 里的手电筒灯），默认关闭，按 F 打开
+bool flashlightOn = false;
 
 // 鼠标是否锁定：true = 转视角（光标隐藏），false = 显示光标（可点 UI）
 bool mouseCaptured = true;
@@ -51,6 +51,18 @@ constexpr int kFlashlightIndex = 1;
 
 // 月光（平行光）在光源列表里的下标：体积雾用它做光柱
 constexpr int kMoonlightIndex = 3;
+
+// 蜡烛光在光源列表里的下标：初始熄灭，玩家交互后点亮
+constexpr int kCandleIndex = 0;
+
+// ---- 蜡烛交互状态 ----
+bool  candleLit      = false;   // 是否已点亮
+bool  candleTargeted = false;   // 准心是否对准且玩家够得着
+float candleOutline  = 0.0f;    // 描边生长进度 0~1
+
+float kInteractRange = 2.0f;    // 可交互距离（米）
+float kCandleRadius  = 0.20f;   // 射线判定球半径，只用来求遮挡距离
+float kAimPixels     = 40.0f;   // 准心到蜡烛投影点的像素距离阈值：越小越"必须瞄准"
 
 // ============ 回调 ============
 void framebufferSizeCallback(GLFWwindow*, int w, int h)
@@ -86,6 +98,55 @@ void keyCallback(GLFWwindow* window, int key, int, int action, int)
 	}
 }
 
+// ============ 交互检测：射线求交 ============
+
+// 射线与球：判断"准心有没有对准某个物体"
+bool RayHitSphere(const glm::vec3& origin, const glm::vec3& dir,
+	const glm::vec3& center, float radius, float maxDist, float& tHit)
+{
+	const glm::vec3 oc = origin - center;
+	const float b = glm::dot(oc, dir);
+	const float c = glm::dot(oc, oc) - radius * radius;
+	const float h = b * b - c;
+	if (h < 0.0f) return false;
+
+	const float sq = std::sqrt(h);
+	float t = -b - sq;
+	if (t < 0.0f) t = -b + sq;      // 起点已经在球内
+	if (t < 0.0f || t > maxDist) return false;
+
+	tHit = t;
+	return true;
+}
+
+// 射线与 AABB：只用来判断"中间有没有东西挡住"
+bool RayHitBox(const glm::vec3& origin, const glm::vec3& dir,
+	const glm::vec3& mn, const glm::vec3& mx, float maxDist)
+{
+	float tmin = 0.0f;
+	float tmax = maxDist;
+
+	for (int i = 0; i < 3; ++i)
+	{
+		if (std::abs(dir[i]) < 1e-6f)
+		{
+			// 平行于这个轴：起点必须落在板内
+			if (origin[i] < mn[i] || origin[i] > mx[i]) return false;
+		}
+		else
+		{
+			float t1 = (mn[i] - origin[i]) / dir[i];
+			float t2 = (mx[i] - origin[i]) / dir[i];
+			if (t1 > t2) { const float tmp = t1; t1 = t2; t2 = tmp; }
+
+			tmin = (t1 > tmin) ? t1 : tmin;
+			tmax = (t2 < tmax) ? t2 : tmax;
+			if (tmin > tmax) return false;
+		}
+	}
+	return true;
+}
+
 void processInput(GLFWwindow* window)
 {
 	if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
@@ -93,10 +154,20 @@ void processInput(GLFWwindow* window)
 
 	if (!mouseCaptured) return;      // Tab 放开鼠标时冻结移动
 
-	// ① 先算出「期望位移」
-	const float speed = 6.0f * deltaTime;
-	const glm::vec3 front = gScene.GetFront();
-	const glm::vec3 right = gScene.GetRight();
+	// ① 期望位移：只取水平分量。
+	// GetFront() 含俯仰角，抬头时按 W 会往天上飞；而碰撞求解只在 XZ 平面上做，
+	// 就算只靠碰撞丢弃 y，卡在盒子里的那条分支也会让 y 生效。
+	glm::vec3 front = gScene.GetFront();
+	front.y = 0.0f;
+	if (glm::length(front) < 1e-4f)          // 正上/正下看时给个默认朝向
+		front = glm::vec3(0.0f, 0.0f, -1.0f);
+	front = glm::normalize(front);
+
+	glm::vec3 right = gScene.GetRight();
+	right.y = 0.0f;
+	right = glm::normalize(right);
+
+	const float speed = 2.0f * deltaTime;   // 走路速度，恐怖场景不需要跑得快
 	glm::vec3 delta(0.0f);
 
 	if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) delta += front * speed;
@@ -104,11 +175,9 @@ void processInput(GLFWwindow* window)
 	if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) delta -= right * speed;
 	if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) delta += right * speed;
 
-	// ② 再交给场景的碰撞求解，决定实际能走多少
+	// ② 碰撞求解：X / Z 分轴试探，撞墙时沿墙滑动
 	if (glm::length(delta) > 1e-6f)
-		// 调试用，正式要把注释解除
-		//gScene.MoveCamera(delta, kPlayerRadius, kPlayerHeight);
-		gScene.cameraPos += delta;
+		gScene.MoveCamera(delta, kPlayerRadius, kPlayerHeight);
 }
 
 int main()
@@ -146,18 +215,48 @@ int main()
 	ImGuiIO& io = ImGui::GetIO();
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 	ImGui::StyleColorsDark();
-	ImGui::GetIO().FontGlobalScale = 1.7f;
+
+	// ImGui 内置字体只有 ASCII，中文会渲染成 "?"。加载系统里的中文字体，
+	// 找不到就退回默认字体（此时英文正常、中文仍是问号）。
+	{
+		const char* kFontCandidates[] = {
+			"C:/Windows/Fonts/msyh.ttc",    // 微软雅黑
+			"C:/Windows/Fonts/msyhbd.ttc",
+			"C:/Windows/Fonts/simhei.ttf",  // 黑体
+			"C:/Windows/Fonts/simsun.ttc",  // 宋体
+		};
+
+		// 用简体常用字集（约 2500 字）：Full 有 2 万多个字形，字体纹理会大到几十 MB
+		const ImWchar* ranges = io.Fonts->GetGlyphRangesChineseSimplifiedCommon();
+
+		ImFont* cnFont = nullptr;
+		for (const char* path : kFontCandidates)
+		{
+			if (!std::filesystem::exists(path)) continue;
+			cnFont = io.Fonts->AddFontFromFileTTF(path, 18.0f, nullptr, ranges);
+			if (cnFont) break;
+		}
+
+		if (!cnFont)
+		{
+			std::cout << "[ImGui] 没找到中文字体，界面中文会显示为 ?\n";
+			io.Fonts->AddFontDefault();
+		}
+
+		io.FontGlobalScale = 1.15f;
+	}
 
 	ImGui_ImplGlfw_InitForOpenGL(window, true);
 	ImGui_ImplOpenGL3_Init("#version 330");
 
 	// 搭建场景
 	SetupScene(gScene);
-	auto& models = SceneModels();          // ImGui 面板用
 
 	CShader shader("assets/shaders/horror.vert", "assets/shaders/horror.frag");
 	// 延迟着色的几何 Pass：只写 G-buffer，不算光照
 	CShader gbufferShader("assets/shaders/gbuffer.vert", "assets/shaders/gbuffer.frag");
+	// 交互描边：沿法线外扩画一遍背面
+	CShader outlineShader("assets/shaders/outline.vert", "assets/shaders/outline.frag");
 
 	// HDR 离屏缓冲：场景先画进浮点纹理，再经色调映射输出到窗口
 	int initW = 1800, initH = 1000;
@@ -175,9 +274,9 @@ int main()
 
 	// IBL：烘环境 cubemap + 辐照度 + 预过滤 + BRDF LUT，只需一次
 	CIBL ibl;
-	gScene.Lights()[2].direction = glm::normalize(glm::vec3(0.0f, -0.30f, -1.0f));
-	gScene.Lights()[2].cutoffDeg = 18.0f;
-	gScene.Lights()[2].outerCutoffDeg = 55.0f;
+
+	// 洗手间灯（2 号）已是点光，参数在 SceneSetup 里配好。
+	// 这里不要再覆盖 direction / cutoffDeg，否则会被当成聚光处理。
 	ibl.Generate();
 
 	bool useDeferred = true;    // 延迟着色开关（ImGui 可切回前向）
@@ -231,6 +330,67 @@ int main()
 		glm::mat4 projection = glm::perspective(glm::radians(60.0f),
 			(float)fbw / (float)fbh, 0.1f, 100.0f);
 
+		// ---- 蜡烛交互：距离 + 屏幕空间瞄准 + 遮挡 ----
+		{
+			const glm::vec3 eye  = gScene.cameraPos;
+			const glm::vec3 dir  = gScene.GetFront();
+			const glm::vec3 ctr  = CandleFlamePosition() - glm::vec3(0.0f, 0.12f, 0.0f);
+			const float     dist = glm::length(ctr - eye);
+
+			candleTargeted = false;
+			float tCandle = 0.0f;
+
+			if (dist < kInteractRange)
+			{
+				// 用"屏幕像素距离"判定瞄准，而不是物理半径：
+				// 球体在近处投影很大，稍微偏一点也会命中；换算成像素后与距离无关
+				const glm::vec4 clip = projection * gScene.GetView() * glm::vec4(ctr, 1.0f);
+
+				if (clip.w > 0.0f)
+				{
+					const glm::vec3 ndc = glm::vec3(clip) / clip.w;
+					const float dx = ndc.x * 0.5f * (float)fbw;
+					const float dy = ndc.y * 0.5f * (float)fbh;
+					const float screenDist = std::sqrt(dx * dx + dy * dy);
+
+					if (screenDist < kAimPixels &&
+						RayHitSphere(eye, dir, ctr, kCandleRadius, kInteractRange, tCandle))
+					{
+						candleTargeted = true;
+
+						// 中间有墙或家具挡着就不算瞄准
+						for (const Box& b : gScene.Boxes())
+						{
+							if (RayHitBox(eye, dir, b.min, b.max, tCandle))
+							{
+								candleTargeted = false;
+								break;
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// E 键：对准蜡烛时切换点燃状态
+		{
+			static bool ePrev = false;
+			const bool  eNow  = glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS;
+			if (eNow && !ePrev && candleTargeted)
+				candleLit = !candleLit;
+			ePrev = eNow;
+		}
+
+		{
+			// 点亮前后都显示描边：只要求瞄准即可
+			const float target = candleTargeted ? 1.0f : 0.0f;
+			candleOutline += (target - candleOutline) * (1.0f - std::exp(-4.5f * deltaTime));
+		}
+
+		// 光源和火焰跟着状态走
+		gScene.Lights()[kCandleIndex].enabled = candleLit;
+		flame.enabled = candleLit;
+
 		if (hdr.enabled)
 		{
 			// 后处理要采样的深度/法线：延迟走 G-buffer，前向走 HDR 缓冲
@@ -265,8 +425,9 @@ int main()
 				}
 
 				// ---- 光照 Pass：逐像素读 G-buffer 算光照，写进 HDR 缓冲 ----
+				// alpha 清 0：bloom 用它当自发光遮罩，只有火焰会把 alpha 抬起来
 				hdr.Begin();
-				glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+				glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 				glClear(GL_COLOR_BUFFER_BIT);
 
 				gScene.SetupDeferredLighting(deferred.Shader(), projection);
@@ -289,7 +450,7 @@ int main()
 			{
 				// HDR Pass：场景画进浮点缓冲，> 1.0 的亮度不被切掉
 				hdr.Begin();
-				glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+				glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 				glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 				// 阴影 Pass + 灯光 uniform + 按材质绘制，全在场景内部完成
@@ -299,14 +460,38 @@ int main()
 				normalTex = hdr.GetNormalTexture();
 			}
 
-			// 镜面：把反射纹理贴到洗手间镜子上（深度测试用 G-buffer 的深度）
-			// 只有延迟路径做了反射 Pass，前向路径这里跳过
+			// 镜面：把反射纹理贴到洗手间镜子上
 			if (useDeferred)
-				mirror.Draw(projection, gScene.GetView());
+				mirror.Draw(gScene, projection, gScene.GetView(), gScene.cameraPos);
+
+			// 交互描边：进度 > 0 就画，这样淡出时也能看到轮廓收回
+			// 只画背面 + 不写深度：外扩出来的壳正好露在物体外侧
+			if (candleOutline > 0.002f)
+			{
+				if (CScene::Group* cg = CandleGroup())
+				{
+					glEnable(GL_DEPTH_TEST);
+					glDepthMask(GL_FALSE);
+					glCullFace(GL_FRONT);
+
+					// 竖直范围：底 = 模型位置（原点在底面），顶 = 火焰根部
+					const float yMin = cg->modelPos.y;
+					const float yMax = CandleFlamePosition().y;
+
+					gScene.DrawOutline(outlineShader, *cg,
+						projection * gScene.GetView(), 0.006f,
+						glm::vec3(0.35f, 0.02f, 0.015f),
+						yMin, yMax, candleOutline);
+
+					glCullFace(GL_BACK);
+					glDepthMask(GL_TRUE);
+				}
+			}
 
 			// 蜡烛火焰：半透明，放在不透明场景之后、后处理之前
-			flame.Render(projection * gScene.GetView(), CandleFlamePosition(),
-				(float)glfwGetTime());
+			if (candleLit)
+				flame.Render(projection * gScene.GetView(), CandleFlamePosition(),
+					(float)glfwGetTime());
 
 			hdr.End();
 
@@ -352,8 +537,9 @@ int main()
 			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 			gScene.Render(shader, projection, false);
 
-			flame.Render(projection * gScene.GetView(), CandleFlamePosition(),
-				(float)glfwGetTime());
+			if (candleLit)
+				flame.Render(projection * gScene.GetView(), CandleFlamePosition(),
+					(float)glfwGetTime());
 		}
 
 		// ================= ImGui =================
@@ -361,186 +547,70 @@ int main()
 		ImGui_ImplGlfw_NewFrame();
 		ImGui::NewFrame();
 
-		ImGui::SetNextWindowSize(ImVec2(460, 720), ImGuiCond_FirstUseEver);
+		// ---- 准心 + 交互提示----
+		if (mouseCaptured)
+		{
+			ImGuiViewport* vp = ImGui::GetMainViewport();
+			const ImVec2 c(vp->Pos.x + vp->Size.x * 0.5f,
+			               vp->Pos.y + vp->Size.y * 0.5f);
+			ImDrawList* dl = ImGui::GetBackgroundDrawList();
+
+			dl->AddCircleFilled(c, 2.0f, IM_COL32(255, 255, 255, 150), 8);
+		}
+
+		ImGui::SetNextWindowSize(ImVec2(340, 560), ImGuiCond_FirstUseEver);
 		ImGui::SetNextWindowPos(ImVec2(12, 12), ImGuiCond_FirstUseEver);
-		ImGui::Begin("ImGui");
+		ImGui::Begin("Horror Demo");
 		ImGui::Text("FPS %.1f", ImGui::GetIO().Framerate);
 		ImGui::Separator();
+		ImGui::Text("WASD   移动");
+		ImGui::Text("F / G  手电筒开 / 关");
+		ImGui::Text("Tab    切换鼠标捕获");
+		ImGui::Text("左键   点亮 / 熄灭蜡烛");
+		ImGui::Separator();
 
-		// HDR 总开关：关掉后完全绕过浮点缓冲，等同加 HDR 之前的渲染
+		// ---- 渲染管线 ----
+		ImGui::Text("渲染");
 		ImGui::Checkbox("HDR", &hdr.enabled);
 		if (hdr.enabled)
 		{
 			ImGui::SameLine();
-			ImGui::Checkbox("tone mapping", &hdr.toneMapping);
-			ImGui::SliderFloat("exposure", &hdr.exposure, 0.1f, 5.0f);
+			ImGui::Checkbox("色调映射", &hdr.toneMapping);
+			ImGui::SliderFloat("曝光", &hdr.exposure, 0.1f, 5.0f);
 		}
 		else
 		{
 			ImGui::SameLine();
-			ImGui::TextDisabled("(LDR 直出，8 bit)");
+			ImGui::TextDisabled("(LDR 直出)");
 		}
+		ImGui::Checkbox("延迟着色", &useDeferred);
+		ImGui::Checkbox("IBL 环境光", &ibl.enabled);
+		ImGui::Checkbox("FXAA", &fxaa.enabled);
 		ImGui::Separator();
 
-		// 体积雾（平行光，月光穿过窗洞形成光柱）
-		ImGui::Checkbox("volumetric fog", &fog.enabled);
-		ImGui::Checkbox("SSAO", &ssao.enabled);
-		if (ssao.enabled)
-		{
-			ImGui::SliderFloat("ssao radius", &ssao.radius, 0.1f, 4.0f);
-			ImGui::SliderFloat("ssao bias", &ssao.bias, 0.0f, 0.1f);
-			ImGui::SliderFloat("ssao strength", &ssao.strength, 0.0f, 2.0f);
-			ImGui::SliderFloat("ssao power", &ssao.power, 1.0f, 4.0f);
-		}
-		ImGui::Checkbox("bloom", &bloom.enabled);
+		// ---- 后处理 ----
+		ImGui::Text("后处理");
+		ImGui::Checkbox("Bloom 泛光", &bloom.enabled);
 		if (bloom.enabled)
 		{
-			ImGui::SliderFloat("bloom threshold", &bloom.threshold, 0.0f, 4.0f);
-			ImGui::SliderFloat("bloom strength", &bloom.strength, 0.0f, 2.0f);
-			ImGui::SliderFloat("bloom radius", &bloom.radius, 0.2f, 4.0f);
+			ImGui::Checkbox("只对蜡烛发光", &bloom.onlyEmissive);
+			ImGui::SliderFloat("泛光强度", &bloom.strength, 0.0f, 2.0f);
 		}
-		ImGui::Checkbox("FXAA", &fxaa.enabled);
-		ImGui::Checkbox("deferred shading", &useDeferred);
-		ImGui::SliderFloat("pbr gain", &deferred.pbrGain, 1.0f, 6.0f);
-		ImGui::Checkbox("IBL", &ibl.enabled);
-		ImGui::SliderFloat("env intensity", &ibl.intensity, 0.0f, 3.0f);
-		ImGui::Checkbox("mirror", &mirror.enabled);
-		ImGui::SliderFloat("mirror tint", &mirror.tint, 0.0f, 1.5f);
-
-		// 闪电（乘在月光亮度上，不新增光源）
-		ImGui::Checkbox("lightning", &lightning.enabled);
-		if (lightning.enabled)
-		{
-			ImGui::SliderFloat("flash gain", &lightning.gain, 1.0f, 30.0f);
-			ImGui::SliderFloat("flash min gap", &lightning.minInterval, 0.5f, 20.0f);
-			ImGui::SliderFloat("flash max gap", &lightning.maxInterval, 1.0f, 40.0f);
-			if (ImGui::Button("flash now"))
-				lightning.Trigger();
-		}
-
-		ImGui::Checkbox("candle flame", &flame.enabled);
-		if (flame.enabled)
-		{
-			ImGui::SliderFloat("flame intensity", &flame.intensity, 0.0f, 3.0f);
-			ImGui::SliderFloat("flame scale", &flame.scale, 0.2f, 3.0f);
-		}
+		ImGui::Checkbox("SSAO 环境光遮蔽", &ssao.enabled);
+		if (ssao.enabled)
+			ImGui::SliderFloat("遮蔽强度", &ssao.strength, 0.0f, 2.0f);
+		ImGui::Checkbox("体积雾", &fog.enabled);
 		if (fog.enabled)
-		{
-			if (!hdr.enabled)
-			{
-				ImGui::SameLine();
-				ImGui::TextDisabled("(需要 HDR 开启)");
-			}
-			ImGui::SliderFloat("fog density",  &fog.densityBase,   0.0f, 0.30f);
-			ImGui::SliderFloat("fog falloff",  &fog.heightFalloff, 0.0f, 2.0f);
-			ImGui::SliderFloat("fog distance", &fog.maxDistance,   5.0f, 60.0f);
-			ImGui::SliderFloat("fog phase",    &fog.phaseG,       -0.9f, 0.95f);
-		}
+			ImGui::SliderFloat("雾浓度", &fog.densityBase, 0.0f, 0.30f);
 		ImGui::Separator();
 
-		auto& lights = gScene.Lights();
-		for (int i = 0; i < (int)lights.size(); ++i)
-		{
-			ImGui::PushID(i);
-			CLight& l = lights[i];
-			const char* typeName = (l.type == 1) ? "spot" : (l.type == 2 ? "directional" : "point");
-			ImGui::Text("Light %d (%s)", i, typeName);
-			ImGui::Checkbox("enabled", &l.enabled);
-			if (!l.followCamera)
-			{
-				ImGui::DragFloat3("position", &l.position.x, 0.05f);
-				ImGui::DragFloat3("direction", &l.direction.x, 0.02f);
-			}
-			ImGui::SliderFloat("intensity", &l.intensity, 0.0f, 20.0f);
-			if (l.type == 1)
-			{
-				ImGui::SliderFloat("cutoff", &l.cutoffDeg, 1.0f, 80.0f);
-				ImGui::SliderFloat("outerCutoff", &l.outerCutoffDeg, 1.0f, 89.0f);
-			}
-			if (l.type == 2)
-			{
-				ImGui::SliderFloat("range", &l.range, 0.5f, 50.0f);
-			}
-			ImGui::Checkbox("castShadow", &l.castShadow);
-			ImGui::ColorEdit3("color", &l.color.x);
-
-			// 手持跟随的滞后程度（只影响朝向，位置是即时跟随）
-			if (l.followCamera)
-			{
-				ImGui::SliderFloat("hold dir speed", &gScene.followDirSpeed, 0.5f, 30.0f);
-			}
-			ImGui::Separator();
-			ImGui::PopID();
-		}
-
-		ImGui::Separator();
-		int shadowMode = gScene.ShadowMode();
-		const char* kShadowModes[] = { "single tap", "PCF 3x3", "PCSS" };
-		if (ImGui::Combo("shadow filter", &shadowMode, kShadowModes, 3))
-			gScene.SetShadowMode(shadowMode);
-
-		ImGui::Separator();
-		ImGui::Text("Materials");
-		auto& groups = gScene.Groups();
-		for (int i = 0; i < (int)groups.size(); ++i)
-		{
-			CMaterial& mat = groups[i]->material;
-			ImGui::PushID(1000 + i);
-			ImGui::Text("Group %d (%s)", i,
-				mat.HasNormalMap() ? "albedo+normal" : (mat.HasTexture() ? "albedo" : "solid"));
-			ImGui::SliderFloat("uScale /m", &mat.uScale, 0.02f, 3.0f);
-			ImGui::SliderFloat("normalStrength", &mat.normalStrength, 0.0f, 3.0f);
-			ImGui::SliderFloat("metallic", &mat.metallic, 0.0f, 1.0f);
-			ImGui::SliderFloat("roughness", &mat.roughness, 0.04f, 1.0f);
-			ImGui::ColorEdit3("tint", &mat.tint.x);
-			ImGui::Separator();
-			ImGui::PopID();
-		}
-
-		// ---------------- 模型位置 ----------------
-		ImGui::Separator();
-		ImGui::Text("Models");
-
-		// 默认关闭：拖动后的值会一直保留，不会被代码里的初值覆盖
-		// 勾上则每帧写回初值（用于对比 / 复位调试）
-		static bool autoReset = false;
-		ImGui::Checkbox("auto reset every frame", &autoReset);
-		ImGui::SameLine();
-		const bool clickedReset = ImGui::Button("Reset All");
-
-		if (clickedReset || autoReset)
-		{
-			for (auto& m : models)
-			{
-				m.group->modelPos    = m.initPos;
-				m.group->modelRotDeg = m.initRot;
-				m.group->modelScale  = m.initScale;
-				gScene.RefreshBox(*m.group);
-			}
-		}
-
-		for (int i = 0; i < (int)models.size(); ++i)
-		{
-			ModelHandle& m = models[i];
-			ImGui::PushID(2000 + i);
-			ImGui::Text("%s", m.name.c_str());
-
-			bool changed = false;
-			changed |= ImGui::DragFloat3("pos", &m.group->modelPos.x, 0.02f);
-			changed |= ImGui::DragFloat3("rot", &m.group->modelRotDeg.x, 0.5f);
-
-			float s = m.group->modelScale.x;
-			if (ImGui::DragFloat("scale", &s, 0.005f, 0.01f, 5.0f))
-			{
-				m.group->modelScale = glm::vec3(s);   // 保持等比，避免法线被拉歪
-				changed = true;
-			}
-
-			// 位置变了就重算碰撞盒，否则玩家会撞到旧位置的空气墙
-			if (changed) gScene.RefreshBox(*m.group);
-
-			ImGui::PopID();
-		}
+		// ---- 场景 ----
+		ImGui::Text("场景");
+		ImGui::Checkbox("镜面反射", &mirror.enabled);
+		ImGui::Checkbox("闪电", &lightning.enabled);
+		ImGui::Checkbox("蜡烛火焰", &flame.enabled);
+		if (flame.enabled)
+			ImGui::SliderFloat("火焰亮度", &flame.intensity, 0.0f, 3.0f);
 
 		ImGui::End();
 

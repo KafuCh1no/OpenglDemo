@@ -26,6 +26,9 @@ std::vector<ModelHandle>& SceneModels();
 // 蜡烛火焰根部（世界坐标），每帧读取，跟随 ImGui 拖动
 glm::vec3 CandleFlamePosition();
 
+// 蜡烛模型所在的分组（交互描边要用它的 mesh）
+CScene::Group* CandleGroup();
+
 // 洗手间镜子的玻璃面（平面反射用）：中心点、朝向房间的法线、半宽/半高。
 // 会跟随 ImGui 里拖动过的 "BathroomMirror" 模型位置
 struct MirrorSurface

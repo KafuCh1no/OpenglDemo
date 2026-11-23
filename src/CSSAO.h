@@ -40,7 +40,8 @@ private:
 	int m_height = 0;
 
 	unsigned int m_aoFbo   = 0, m_aoTex   = 0;
-	unsigned int m_blurFbo = 0, m_blurTex = 0;
+	unsigned int m_tempFbo = 0, m_tempTex = 0;   // 水平模糊的中间结果
+	unsigned int m_blurFbo = 0, m_blurTex = 0;   // 垂直模糊的最终结果
 	unsigned int m_resultTex = 0;
 
 	unsigned int m_noiseTex = 0;

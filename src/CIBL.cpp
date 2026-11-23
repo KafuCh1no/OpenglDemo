@@ -3,7 +3,13 @@
 #include <glad/glad.h>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <algorithm>
+#include <cstdint>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <string>
+#include <vector>
 
 namespace
 {
@@ -64,6 +70,174 @@ namespace
 		const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
 		if (status != GL_FRAMEBUFFER_COMPLETE)
 			std::printf("[CIBL] %s framebuffer incomplete: 0x%x\n", tag, status);
+	}
+
+	// ================= 磁盘缓存 =================
+	// 文件格式：28 字节定长头 + 原始 float 数据
+	// 数据顺序：mip 外层、face 内层（cubemap），单张纹理（2D）
+	constexpr int32_t kCacheMagic   = 0x314C4249;   // "IBL1"
+	constexpr int32_t kCacheVersion = 1;
+
+	struct CacheHeader
+	{
+		int32_t magic;
+		int32_t version;
+		int32_t width;
+		int32_t height;
+		int32_t faces;
+		int32_t mips;
+		int32_t channels;
+	};
+	static_assert(sizeof(CacheHeader) == 7 * sizeof(int32_t),
+		"CacheHeader 必须紧凑排列，否则跨编译器的文件格式会不一致");
+
+	void WriteHeader(std::ofstream& o, int w, int h, int faces, int mips, int ch)
+	{
+		const CacheHeader hd{ kCacheMagic, kCacheVersion, w, h, faces, mips, ch };
+		o.write(reinterpret_cast<const char*>(&hd), sizeof(hd));
+	}
+
+	bool ReadHeader(std::ifstream& i, CacheHeader& hd)
+	{
+		i.read(reinterpret_cast<char*>(&hd), sizeof(hd));
+		if (!i) return false;
+		return hd.magic == kCacheMagic && hd.version == kCacheVersion
+			&& hd.width > 0 && hd.height > 0
+			&& hd.faces > 0 && hd.mips > 0 && hd.channels > 0;
+	}
+
+	bool SaveCubemap(const std::string& path, unsigned int tex,
+		int size, int mips, GLenum format, int channels)
+	{
+		std::ofstream o(path, std::ios::binary);
+		if (!o) return false;
+
+		WriteHeader(o, size, size, 6, mips, channels);
+
+		std::vector<float> buf;
+		glBindTexture(GL_TEXTURE_CUBE_MAP, tex);
+
+		for (int mip = 0; mip < mips; ++mip)
+		{
+			const int s = std::max(size >> mip, 1);
+			buf.resize((size_t)s * s * channels);
+
+			for (int face = 0; face < 6; ++face)
+			{
+				glGetTexImage(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, mip,
+					format, GL_FLOAT, buf.data());
+				o.write(reinterpret_cast<const char*>(buf.data()),
+					(std::streamsize)(buf.size() * sizeof(float)));
+			}
+		}
+
+		glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+		return o.good();
+	}
+
+	bool LoadCubemap(const std::string& path, unsigned int& tex,
+		int expectSize, int expectMips, GLenum internalFormat, GLenum format, int channels)
+	{
+		std::ifstream in(path, std::ios::binary);
+		if (!in) return false;
+
+		CacheHeader hd{};
+		if (!ReadHeader(in, hd)) return false;
+
+		// 尺寸/MIP/通道数任一不符，说明代码改过或文件损坏，当作没有缓存
+		if (hd.width != expectSize || hd.height != expectSize || hd.faces != 6
+			|| hd.mips != expectMips || hd.channels != channels)
+			return false;
+
+		glGenTextures(1, &tex);
+		glBindTexture(GL_TEXTURE_CUBE_MAP, tex);
+
+		std::vector<float> buf;
+		bool ok = true;
+
+		for (int mip = 0; mip < hd.mips && ok; ++mip)
+		{
+			const int s = std::max(hd.width >> mip, 1);
+			buf.resize((size_t)s * s * channels);
+
+			for (int face = 0; face < 6; ++face)
+			{
+				in.read(reinterpret_cast<char*>(buf.data()),
+					(std::streamsize)(buf.size() * sizeof(float)));
+				if (!in) { ok = false; break; }
+
+				glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, mip,
+					internalFormat, s, s, 0, format, GL_FLOAT, buf.data());
+			}
+		}
+
+		if (!ok)
+		{
+			glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+			glDeleteTextures(1, &tex);
+			tex = 0;
+			return false;
+		}
+
+		// 采样参数必须和 CreateCubemap 一致
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER,
+			hd.mips > 1 ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
+
+		glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+		return true;
+	}
+
+	bool Save2D(const std::string& path, unsigned int tex,
+		int size, GLenum format, int channels)
+	{
+		std::ofstream o(path, std::ios::binary);
+		if (!o) return false;
+
+		WriteHeader(o, size, size, 1, 1, channels);
+
+		std::vector<float> buf((size_t)size * size * channels);
+		glBindTexture(GL_TEXTURE_2D, tex);
+		glGetTexImage(GL_TEXTURE_2D, 0, format, GL_FLOAT, buf.data());
+		glBindTexture(GL_TEXTURE_2D, 0);
+
+		o.write(reinterpret_cast<const char*>(buf.data()),
+			(std::streamsize)(buf.size() * sizeof(float)));
+		return o.good();
+	}
+
+	bool Load2D(const std::string& path, unsigned int& tex,
+		int expectSize, GLenum internalFormat, GLenum format, int channels)
+	{
+		std::ifstream in(path, std::ios::binary);
+		if (!in) return false;
+
+		CacheHeader hd{};
+		if (!ReadHeader(in, hd)) return false;
+		if (hd.width != expectSize || hd.height != expectSize
+			|| hd.faces != 1 || hd.mips != 1 || hd.channels != channels)
+			return false;
+
+		std::vector<float> buf((size_t)hd.width * hd.height * channels);
+		in.read(reinterpret_cast<char*>(buf.data()),
+			(std::streamsize)(buf.size() * sizeof(float)));
+		if (!in) return false;
+
+		glGenTextures(1, &tex);
+		glBindTexture(GL_TEXTURE_2D, tex);
+		glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, hd.width, hd.height, 0,
+			format, GL_FLOAT, buf.data());
+
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+		glBindTexture(GL_TEXTURE_2D, 0);
+		return true;
 	}
 }
 
@@ -131,6 +305,77 @@ void CIBL::DrawFullscreenTriangle() const
 }
 
 void CIBL::Generate()
+{
+	if (LoadCached())
+	{
+		std::printf("[CIBL] loaded from cache (%s)\n", m_cacheDir.c_str());
+		return;
+	}
+
+	Bake();
+
+	if (SaveCache())
+		std::printf("[CIBL] cache written to %s\n", m_cacheDir.c_str());
+	else
+		std::printf("[CIBL] WARNING: failed to write cache, will rebake next run\n");
+}
+
+void CIBL::Rebake()
+{
+	Bake();
+	if (SaveCache())
+		std::printf("[CIBL] cache rewritten to %s\n", m_cacheDir.c_str());
+}
+
+// 从磁盘读三张烘焙好的图；任何一张失败都返回 false，转而去烘焙
+bool CIBL::LoadCached()
+{
+	if (!LoadCubemap(Path("ibl_irradiance.bin"), m_irradianceMap,
+			kIrrSize, 1, GL_RGBA16F, GL_RGBA, 4))
+		return false;
+
+	if (!LoadCubemap(Path("ibl_prefilter.bin"), m_prefilterMap,
+			kPrefSize, kPrefMips, GL_RGBA16F, GL_RGBA, 4))
+	{
+		glDeleteTextures(1, &m_irradianceMap);
+		m_irradianceMap = 0;
+		return false;
+	}
+
+	if (!Load2D(Path("ibl_brdf.bin"), m_brdfLut,
+			kBrdfSize, GL_RG16F, GL_RG, 2))
+	{
+		glDeleteTextures(1, &m_irradianceMap);
+		glDeleteTextures(1, &m_prefilterMap);
+		m_irradianceMap = 0;
+		m_prefilterMap  = 0;
+		return false;
+	}
+
+	// 预过滤只有前 kPrefMips 级有内容，和烘焙路径保持一致
+	glBindTexture(GL_TEXTURE_CUBE_MAP, m_prefilterMap);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAX_LEVEL, kPrefMips - 1);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+
+	return true;
+}
+
+bool CIBL::SaveCache() const
+{
+	std::error_code ec;
+	std::filesystem::create_directories(m_cacheDir, ec);   // 已存在时不算错误
+
+	bool ok = true;
+	ok = SaveCubemap(Path("ibl_irradiance.bin"), m_irradianceMap,
+			kIrrSize, 1, GL_RGBA, 4) && ok;
+	ok = SaveCubemap(Path("ibl_prefilter.bin"), m_prefilterMap,
+			kPrefSize, kPrefMips, GL_RGBA, 4) && ok;
+	ok = Save2D(Path("ibl_brdf.bin"), m_brdfLut,
+			kBrdfSize, GL_RG, 2) && ok;
+	return ok;
+}
+
+void CIBL::Bake()
 {
 	// 记下调用前的状态，烘完要还回去
 	GLint  savedViewport[4] = { 0, 0, 0, 0 };

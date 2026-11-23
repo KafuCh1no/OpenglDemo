@@ -10,12 +10,14 @@ uniform mat4 uMirrorVP;   // 镜面相机的 view * projection
 
 out vec2 vUV;
 out vec3 vProj;           // 镜面相机下的裁剪坐标（xy/w 才是采样坐标）
+out vec3 vWorldPos;       // 世界位置：镜面高光要用
 
 void main()
 {
     vUV = aUV;
 
     vec4 world = model * vec4(aPos, 1.0);
+    vWorldPos = world.xyz;
 
     // 主相机：决定镜面片画在屏幕哪个位置
     gl_Position = uProjection * uView * world;

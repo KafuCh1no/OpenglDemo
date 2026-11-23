@@ -188,7 +188,8 @@ void main()
     gNormal = vec4(normalize(Normal), 1.0);
 
     if (uHDR)
-        FragColor = vec4(result, 1.0);
+        // alpha 留给 bloom 当自发光遮罩：不透明几何写 0，只有叠加的火焰会抬起来
+        FragColor = vec4(result, 0.0);
     else
         FragColor = vec4(pow(result, vec3(1.0 / 2.2)), 1.0);
 }

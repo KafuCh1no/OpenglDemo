@@ -4,13 +4,15 @@
 
 #include <glm/glm.hpp>
 
+#include <string>
+
 // 基于图像的光照（IBL）资源：
-//   1. 程序化环境 cubemap（暗房间 + 月光 + 壁炉余光）
+//   1. 程序化环境 cubemap（暗房间 + 月光 + 壁炉余光）—— 中间产物，不缓存
 //   2. 漫反射辐照度 cubemap（32x32，低频）
 //   3. 镜面预过滤 cubemap（128x128 + 5 级 mip，按 roughness 模糊）
 //   4. BRDF 积分查找表（256x256，split-sum 的第二项）
 //
-// 全部在 Generate() 里一次性烘出来，运行时只是采样三张图。
+// 2/3/4 会被烘焙到 assets/cache/*.bin，下次启动直接读文件，跳过整个烘焙过程。
 class CIBL
 {
 public:
@@ -21,9 +23,16 @@ public:
 	CIBL& operator=(const CIBL&) = delete;
 
 	// 需要 GL 上下文已经创建（构造函数之后、主循环之前调用一次）
+	// 有缓存就直接加载，没有则烘焙并把结果写进缓存
 	void Generate();
 
-	unsigned int GetEnvMap()        const { return m_envMap; }
+	// 忽略缓存，强制重新烘焙并覆盖缓存文件
+	void Rebake();
+
+	// 缓存目录（默认 assets/cache）
+	void SetCacheDir(const std::string& dir) { m_cacheDir = dir; }
+
+	unsigned int GetEnvMap()        const { return m_envMap; }   // 缓存命中时为 0，运行时不用它
 	unsigned int GetIrradianceMap() const { return m_irradianceMap; }
 	unsigned int GetPrefilterMap()  const { return m_prefilterMap; }
 	unsigned int GetBrdfLUT()       const { return m_brdfLut; }
@@ -32,6 +41,13 @@ public:
 	float intensity = 1.0f;   // 环境光倍率：0 关闭，1 默认，可以拉到 2~3 看效果
 
 private:
+	void Bake();
+
+	bool LoadCached();
+	bool SaveCache() const;
+
+	std::string Path(const char* name) const { return m_cacheDir + "/" + name; }
+
 	void DrawCube() const;
 	void DrawFullscreenTriangle() const;
 
@@ -54,4 +70,6 @@ private:
 
 	glm::mat4 m_captureProjection = glm::mat4(1.0f);
 	glm::mat4 m_captureViews[6]   = { glm::mat4(1.0f) };
+
+	std::string m_cacheDir = "assets/cache";
 };

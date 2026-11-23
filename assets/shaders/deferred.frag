@@ -54,7 +54,7 @@ const float PI = 3.14159265359;
 // 预过滤 cubemap 一共 5 级 mip（0~4），最粗糙那级对应 roughness = 1
 const float MAX_REFLECTION_LOD = 4.0;
 
-float ShadowCalculation(vec4 fragPosLightSpace, sampler2D shadowMap);
+float ShadowCalculation(vec4 fragPosLightSpace, sampler2D shadowMap, float bias);
 float PointShadowCalculation(vec3 fragPos, vec3 lightPos, samplerCube cube, float farPlane);
 float DistributionGGX(float NdotH, float roughness);
 float GeometrySmith(float NdotV, float NdotL, float roughness);
@@ -65,9 +65,10 @@ void main()
 {
     vec4 albedoSample = texture(gAlbedo, vUV);
     // a = 0 表示这个像素没有几何（天空），直接输出黑，不参与光照
+    // 输出 alpha 同样为 0：HDR 的 alpha 用作 bloom 的“自发光遮罩”
     if (albedoSample.a < 0.5)
     {
-        FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+        FragColor = vec4(0.0, 0.0, 0.0, 0.0);
         return;
     }
 
@@ -172,11 +173,17 @@ void main()
         if (lightType[i] == 1 || lightType[i] == 2)
         {
             vec4 lp = lightSpaceMatrices[i] * vec4(WorldPos, 1.0);
+
+            // 斜率自适应 bias：表面越偏离正对光源，深度梯度越大，需要的偏移也越大。
+            // 固定的 0.0001 在斜面上挡不住采样误差，墙面会把自己判成遮挡物，
+            // PCSS 的 blocker search 时有时无，表现为光照上的噪点。
+            float shadowBias = max(0.0012 * (1.0 - NdotL), 0.00015);
+
             float shadow = 0.0;
-            if      (i == 0) shadow = ShadowCalculation(lp, shadowMap0);
-            else if (i == 1) shadow = ShadowCalculation(lp, shadowMap1);
-            else if (i == 2) shadow = ShadowCalculation(lp, shadowMap2);
-            else if (i == 3) shadow = ShadowCalculation(lp, shadowMap3);
+            if      (i == 0) shadow = ShadowCalculation(lp, shadowMap0, shadowBias);
+            else if (i == 1) shadow = ShadowCalculation(lp, shadowMap1, shadowBias);
+            else if (i == 2) shadow = ShadowCalculation(lp, shadowMap2, shadowBias);
+            else if (i == 3) shadow = ShadowCalculation(lp, shadowMap3, shadowBias);
             occl = 1.0 - shadow;
         }
         else if (lightType[i] == 0)
@@ -195,7 +202,10 @@ void main()
     float fog = 1.0 - exp(-0.045 * length(viewPos - WorldPos));
     result = mix(result, vec3(0.0), fog);
 
-    FragColor = vec4(result, 1.0);
+    // alpha 不参与成像，留给 bloom 当“自发光遮罩”：
+    // 普通材质写 0，之后只有用加法混合叠加的火焰会把 alpha 抬起来，
+    // 这样 bloom 就只会从蜡烛那儿提取，而不是全屏按亮度硬截。
+    FragColor = vec4(result, 0.0);
 }
 
 // 黄金角螺旋（Vogel 分布）：单位圆内第 i 个采样点（共 n 个）
@@ -208,7 +218,7 @@ vec2 goldenDisk(int i, int n)
 }
 
 // 聚光、平行光阴影计算
-float ShadowCalculation(vec4 fragPosLightSpace, sampler2D shadowMap)
+float ShadowCalculation(vec4 fragPosLightSpace, sampler2D shadowMap, float bias)
 {
     vec3 proj = fragPosLightSpace.xyz / fragPosLightSpace.w;
     proj = proj * 0.5 + 0.5;
@@ -219,7 +229,6 @@ float ShadowCalculation(vec4 fragPosLightSpace, sampler2D shadowMap)
     }
 
     float currentDepth = proj.z;
-    float bias         = 0.0001;
     vec2  texelSize    = 1.0 / vec2(textureSize(shadowMap, 0));
 
     if (uShadowMode == 0)

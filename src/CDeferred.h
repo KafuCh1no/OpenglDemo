@@ -21,9 +21,9 @@ public:
 
 	bool enabled = true;
 
-	// Cook-Torrance 漫反射带 1/PI，比 Blinn-Phong 暗约 3 倍；
-	// 3.14 保持旧观感，调到 1.0 是纯物理值
-	float pbrGain = 3.14159265f;
+	// Cook-Torrance 漫反射带 1/PI。1.0 = 纯物理值；
+	// 之前用 3.14 补偿亮度，代价是直射光比 IBL 亮 π 倍
+	float pbrGain = 1.0f;
 
 	// 环境光照（IBL）：三张烘焙好的纹理由 CIBL 提供，0 表示还没生成
 	unsigned int iblIrradiance = 0;

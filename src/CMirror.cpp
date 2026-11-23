@@ -223,7 +223,8 @@ void CMirror::RenderReflection(CScene& scene, CShader& gbufferShader, CDeferred&
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT);
 
-	scene.SetupDeferredLightingFor(deferred.Shader(), mirrorView, mirrorProj);
+	// 传镜像相机位置：反射画面的高光/菲涅尔要按这个视点算
+	scene.SetupDeferredLightingFor(deferred.Shader(), mirrorView, mirrorProj, mirrorCamPos);
 	deferred.Render(m_gbuf.GetAlbedoTexture(), m_gbuf.GetNormalTexture(),
 		m_gbuf.GetPositionTexture());
 
@@ -233,7 +234,8 @@ void CMirror::RenderReflection(CScene& scene, CShader& gbufferShader, CDeferred&
 	glViewport(prevVp[0], prevVp[1], prevVp[2], prevVp[3]);
 }
 
-void CMirror::Draw(const glm::mat4& projection, const glm::mat4& mainView)
+void CMirror::Draw(CScene& scene, const glm::mat4& projection, const glm::mat4& mainView,
+	const glm::vec3& cameraPos)
 {
 	if (!enabled || !IsValid()) return;
 
@@ -254,7 +256,9 @@ void CMirror::Draw(const glm::mat4& projection, const glm::mat4& mainView)
 	glDisable(GL_CULL_FACE);
 	glDisable(GL_BLEND);
 
-	m_shader.use();
+	// 光源数组：镜面反光要按真实光照算（内部会 shader.use()）
+	scene.UploadLightingUniforms(m_shader);
+
 	m_shader.setMat4("uProjection", projection);
 	m_shader.setMat4("uView", mainView);
 	m_shader.setMat4("model", model);
@@ -264,6 +268,11 @@ void CMirror::Draw(const glm::mat4& projection, const glm::mat4& mainView)
 	m_shader.setVec2("uInvScreen", glm::vec2(1.0f / (float)std::max(m_screenW, 1),
 		                                     1.0f / (float)std::max(m_screenH, 1)));
 	m_shader.setInt("uReflection", 0);
+
+	// 镜面高光所需的法线与视点
+	m_shader.setVec3("uNormal", m_normal);
+	m_shader.setVec3("viewPos", cameraPos);
+	m_shader.setFloat("uSpecStrength", specStrength);
 
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, m_colorTex);

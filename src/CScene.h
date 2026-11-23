@@ -157,8 +157,20 @@ public:
 
 	// 镜面反射的延迟光照 Pass：把相机换成镜像相机后上传灯光/阴影 uniform。
 	// 必须在本帧 RenderToGBuffer 之后调用，否则阴影图还没生成。
+	// 镜像相机等非主视角用：必须把视线原点一起传进去，
+	// 否则 viewPos 还是主相机位置，NdotV / 菲涅尔 / 高光都会算错
 	void SetupDeferredLightingFor(CShader& shader, const glm::mat4& view,
-		const glm::mat4& projection);
+		const glm::mat4& projection, const glm::vec3& eyePos);
+
+	// 只上传光源参数（不含相机/阴影），给自定义前向 pass 用，比如镜面高光
+	void UploadLightingUniforms(CShader& shader);
+
+	// 描边：把单个分组的网格沿法线外扩画一遍（交互高亮用）
+	// 面剔除/深度状态由调用方设置：通常是 glCullFace(GL_FRONT) + glDepthMask(GL_FALSE)
+	// yMin/yMax 是物体世界高度范围，progress 控制从下往上的生长（1 = 完整显示）
+	void DrawOutline(CShader& shader, Group& g, const glm::mat4& viewProj,
+		float thickness, const glm::vec3& color,
+		float yMin, float yMax, float progress);
 
 	// 预先创建n个阴影 Pass
 	void PrepareShadows(int count = 3);

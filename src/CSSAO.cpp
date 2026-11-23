@@ -83,6 +83,8 @@ void CSSAO::DestroyBuffers()
 {
 	if (m_aoFbo)   { glDeleteFramebuffers(1, &m_aoFbo);   m_aoFbo = 0; }
 	if (m_aoTex)   { glDeleteTextures(1, &m_aoTex);       m_aoTex = 0; }
+	if (m_tempFbo) { glDeleteFramebuffers(1, &m_tempFbo); m_tempFbo = 0; }
+	if (m_tempTex) { glDeleteTextures(1, &m_tempTex);     m_tempTex = 0; }
 	if (m_blurFbo) { glDeleteFramebuffers(1, &m_blurFbo); m_blurFbo = 0; }
 	if (m_blurTex) { glDeleteTextures(1, &m_blurTex);     m_blurTex = 0; }
 	m_resultTex = 0;
@@ -100,6 +102,7 @@ void CSSAO::Resize(int width, int height)
 	m_height = h;
 
 	m_aoFbo   = MakeColorFBO(w, h, m_aoTex,   GL_R16F);
+	m_tempFbo = MakeColorFBO(w, h, m_tempTex, GL_R16F);
 	m_blurFbo = MakeColorFBO(w, h, m_blurTex, GL_R16F);
 }
 
@@ -145,18 +148,29 @@ void CSSAO::Render(unsigned int depthTex, unsigned int normalTex,
 	glBindVertexArray(m_quadVao);
 	glDrawArrays(GL_TRIANGLES, 0, 3);
 
-	// 模糊去噪
-	glBindFramebuffer(GL_FRAMEBUFFER, m_blurFbo);
-	glViewport(0, 0, m_width, m_height);
-
+	// 模糊去噪：可分离高斯两趟（水平 -> 垂直）
+	// 单趟 5x5 盒式压不住 4x4 噪声纹理的图案，会在平面上留下网格状麻点
 	m_blurShader.use();
 	m_blurShader.setInt("gAO", 0);
-	m_blurShader.setFloat("uTexelX", 1.0f / (float)m_width);
-	m_blurShader.setFloat("uTexelY", 1.0f / (float)m_height);
+	m_blurShader.setVec2("uTexelSize", glm::vec2(1.0f / (float)m_width,
+	                                             1.0f / (float)m_height));
 
+	// 第一趟：水平
+	glBindFramebuffer(GL_FRAMEBUFFER, m_tempFbo);
+	glViewport(0, 0, m_width, m_height);
+	m_blurShader.setVec2("uDirection", glm::vec2(1.0f, 0.0f));
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, m_aoTex);
 	glDrawArrays(GL_TRIANGLES, 0, 3);
+
+	// 第二趟：垂直
+	glBindFramebuffer(GL_FRAMEBUFFER, m_blurFbo);
+	glViewport(0, 0, m_width, m_height);
+	m_blurShader.setVec2("uDirection", glm::vec2(0.0f, 1.0f));
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, m_tempTex);
+	glDrawArrays(GL_TRIANGLES, 0, 3);
+
 	glBindVertexArray(0);
 
 	m_resultTex = m_blurTex;
