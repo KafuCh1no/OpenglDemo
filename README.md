@@ -10,21 +10,31 @@
 
 **渲染管线**
 - 延迟着色：G-buffer（albedo / 世界法线 / 世界坐标）+ 屏幕空间逐像素光照
-- PBR（Cook-Torrance）+ IBL：辐照度卷积、GGX 预过滤、split-sum BRDF LUT，烘焙结果带磁盘缓存
-- HDR（RGBA16F）+ ACES tone mapping + sRGB 编码
+- PBR（Cook-Torrance）+ IBL：辐照度卷积、GGX 预过滤、split-sum BRDF LUT 处理环境光，烘焙结果带磁盘缓存
+- HDR（RGBA16F）+ ACES tone mapping + gamma 校正
 
 **光照与阴影**
 - 点光 / 聚光 / 平行光三种类型
 - 点光用 cubemap 六面深度图，聚光与平行光用 2D 深度图
-- PCF 3×3 与 PCSS 软阴影
+- 支持 PCF 3×3 与 PCSS 软阴影
 
 **后处理**
-- 屏幕空间体积雾（光线步进 + 阴影图可见性 + Henyey-Greenstein 相函数）
+- 屏幕空间体积雾（光线步进 + 阴影图可见性 + 相函数）
 - SSAO、Bloom、FXAA
-- 平面反射（镜像相机 + 斜近裁剪面）
+- 镜子平面反射（镜像相机 + 斜近裁剪面）
 
 **其他**
-- 程序化火焰、闪电、碰撞检测、蜡烛交互
+- 程序化火焰、闪电、碰撞检测、蜡烛交互描边
+
+## 操作
+
+| 按键 | 功能 |
+|------|------|
+| WASD | 移动 |
+| 鼠标 | 转视角 |
+| F / G | 手电筒开 / 关 |
+| Tab | 释放鼠标 |
+| E | 点亮 / 熄灭蜡烛 |
 
 ## 构建
 
@@ -49,16 +59,6 @@ Visual Studio 2022 安装器里需要勾选：
 | **适用于 Windows 的 C++ CMake 工具** | 
 | Ninja | 
 
-
-## 操作
-
-| 按键 | 功能 |
-|------|------|
-| WASD | 移动 |
-| 鼠标 | 转视角 |
-| F / G | 手电筒开 / 关 |
-| Tab | 释放鼠标 |
-| E | 点亮 / 熄灭蜡烛 |
 
 ## 资产来源
 
